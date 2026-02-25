@@ -62,7 +62,7 @@ use crate::{
         },
     },
     filter::conditions::IoThrottle,
-    io::{PAGE, bytes::IoSliceMut},
+    io::{PAGE, bytes::IoSliceMut, device::PartitionableDevice},
     keeper::PieceRef,
     serde::EntryDeserializer,
 };
@@ -81,7 +81,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    device: Arc<dyn Device>,
+    device: Arc<dyn PartitionableDevice>,
     block_size: usize,
     compression: Compression,
     indexer_shards: usize,
@@ -137,7 +137,7 @@ where
     P: Properties,
 {
     /// Create a new block-based disk cache engine builder with default configurations.
-    pub fn new(device: Arc<dyn Device>) -> Self {
+    pub fn new(device: Arc<dyn PartitionableDevice>) -> Self {
         Self {
             device,
             block_size: 16 * 1024 * 1024, // 16 MiB
@@ -859,7 +859,7 @@ mod tests {
         PsyncIoEngineConfig, RejectAll,
         engine::RecoverMode,
         io::{
-            device::{DeviceBuilder, combined::CombinedDeviceBuilder, fs::FsDeviceBuilder},
+            device::{DeviceBuilder, fs::FsDeviceBuilder},
             engine::{IoEngine, IoEngineBuildContext, IoEngineConfig},
         },
         serde::EntrySerializer,

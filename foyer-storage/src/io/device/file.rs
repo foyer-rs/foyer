@@ -21,18 +21,19 @@ use std::{
 use foyer_common::error::{Error, Result};
 use fs4::free_space;
 
-use crate::{
-    RawFile,
-    io::{
-        PAGE,
-        device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+use crate::io::{
+    PAGE,
+    device::{
+        Device, DeviceBuilder, Partition, PartitionId, PartitionableDevice, statistics::Statistics, throttle::Throttle,
     },
+    media::{FileBuilder, Media, MediaBuilder},
 };
 
 /// Builder for a file-based device that manages a single file or a raw block device.
 #[derive(Debug)]
 pub struct FileDeviceBuilder {
     path: PathBuf,
+    offset: u64,
     capacity: Option<usize>,
     throttle: Throttle,
     #[cfg(target_os = "linux")]
@@ -44,11 +45,20 @@ impl FileDeviceBuilder {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             path: path.as_ref().into(),
+            offset: 0,
             capacity: None,
             throttle: Throttle::default(),
             #[cfg(target_os = "linux")]
             direct: false,
         }
+    }
+
+    /// Set the offset of the file device.
+    ///
+    /// The offset is 0 by default.
+    pub fn with_offset(mut self, offset: u64) -> Self {
+        self.offset = offset;
+        self
     }
 
     /// Set the capacity of the file device.
@@ -128,7 +138,9 @@ impl DeviceBuilder for FileDeviceBuilder {
         let statistics = Arc::new(Statistics::new(self.throttle));
 
         let device = FileDevice {
+            filename: self.path.file_name().unwrap().to_string_lossy().into_owned(),
             file,
+            offset: self.offset,
             capacity,
             statistics,
             partitions: RwLock::new(vec![]),
@@ -141,7 +153,9 @@ impl DeviceBuilder for FileDeviceBuilder {
 /// A device upon a single file or a raw block device.
 #[derive(Debug)]
 pub struct FileDevice {
+    filename: String,
     file: Arc<File>,
+    offset: u64,
     capacity: usize,
     partitions: RwLock<Vec<Arc<FilePartition>>>,
     statistics: Arc<Statistics>,
@@ -153,22 +167,39 @@ impl Device for FileDevice {
     }
 
     fn allocated(&self) -> usize {
-        self.partitions.read().unwrap().iter().map(|p| p.size).sum()
+        self.partitions.read().unwrap().iter().map(|p| p.size()).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for FileDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
-        let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
+        let allocated = partitions.iter().map(|p| p.media().file().size()).sum::<usize>();
         if allocated + size > self.capacity {
             return Err(Error::no_space(self.capacity, allocated, allocated + size));
         }
-        let offset = partitions.last().map(|p| p.offset + p.size as u64).unwrap_or_default();
+        let offset = partitions
+            .last()
+            .map(|p| p.media().file().offset() + p.media().file().size() as u64)
+            .unwrap_or(self.offset);
         let id = partitions.len() as PartitionId;
+        let media = MediaBuilder::new()
+            .with_name(self.filename.clone())
+            .with_file(
+                FileBuilder::new(self.file.clone())
+                    .with_offset(offset)
+                    .with_size(size)
+                    .build(),
+            )
+            .build();
+
         let partition = Arc::new(FilePartition {
-            file: self.file.clone(),
+            media,
             id,
-            size,
-            offset,
             statistics: self.statistics.clone(),
         });
         partitions.push(partition.clone());
@@ -182,18 +213,12 @@ impl Device for FileDevice {
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
     }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
-    }
 }
 
 #[derive(Debug)]
 pub struct FilePartition {
-    file: Arc<File>,
+    media: Media,
     id: PartitionId,
-    size: usize,
-    offset: u64,
     statistics: Arc<Statistics>,
 }
 
@@ -203,24 +228,11 @@ impl Partition for FilePartition {
     }
 
     fn size(&self) -> usize {
-        self.size
+        self.media.file().size()
     }
 
-    fn translate(&self, address: u64) -> (RawFile, u64) {
-        #[cfg(any(target_family = "unix", target_family = "wasm"))]
-        let raw = {
-            use std::os::fd::AsRawFd;
-            RawFile(self.file.as_raw_fd())
-        };
-
-        #[cfg(target_family = "windows")]
-        let raw = {
-            use std::os::windows::io::AsRawHandle;
-            RawFile(self.file.as_raw_handle())
-        };
-
-        let address = self.offset + address;
-        (raw, address)
+    fn media(&self) -> &Media {
+        &self.media
     }
 
     fn statistics(&self) -> &Arc<Statistics> {

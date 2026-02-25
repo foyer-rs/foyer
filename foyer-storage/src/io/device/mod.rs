@@ -20,9 +20,7 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use foyer_common::error::Result;
 
-use crate::io::device::statistics::Statistics;
-
-pub type PartitionId = u32;
+use crate::io::{device::statistics::Statistics, media::Media};
 
 /// Raw os file resource.
 ///
@@ -45,23 +43,6 @@ pub trait DeviceBuilder: Send + Sync + 'static + Debug {
     fn build(self) -> Result<Arc<dyn Device>>;
 }
 
-/// Partition is a logical segment of a device.
-pub trait Partition: Send + Sync + 'static + Debug + Any {
-    /// Get the id of the partition.
-    fn id(&self) -> PartitionId;
-
-    /// Get the capacity of the partition.
-    ///
-    /// NOTE: `size` must be 4K aligned.
-    fn size(&self) -> usize;
-
-    /// Translate an address to a raw file descriptor and address.
-    fn translate(&self, address: u64) -> (RawFile, u64);
-
-    /// Get the statistics of the device this partition belongs to.
-    fn statistics(&self) -> &Arc<Statistics>;
-}
-
 /// Device trait.
 pub trait Device: Send + Sync + 'static + Debug + Any {
     /// Get the capacity of the device.
@@ -77,6 +58,11 @@ pub trait Device: Send + Sync + 'static + Debug + Any {
         self.capacity() - self.allocated()
     }
 
+    /// Get the statistics of the device this partition belongs to.
+    fn statistics(&self) -> &Arc<Statistics>;
+}
+
+pub trait PartitionableDevice: Device {
     /// Create a new partition with the given size.
     ///
     /// NOTE:
@@ -90,14 +76,29 @@ pub trait Device: Send + Sync + 'static + Debug + Any {
 
     /// Get the partition with given id in the device.
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition>;
+}
+
+pub type PartitionId = u32;
+
+/// Partition is a logical segment of a device.
+pub trait Partition: Send + Sync + 'static + Debug + Any {
+    /// Get the id of the partition.
+    fn id(&self) -> PartitionId;
+
+    /// Get the capacity of the partition.
+    ///
+    /// NOTE: `size` must be 4K aligned.
+    fn size(&self) -> usize;
+
+    /// Get the media media of the partition.
+    fn media(&self) -> &Media;
 
     /// Get the statistics of the device this partition belongs to.
     fn statistics(&self) -> &Arc<Statistics>;
 }
 
+pub trait KvDevice: Device {}
+
 pub mod file;
 pub mod fs;
 pub mod noop;
-
-pub mod combined;
-pub mod partial;

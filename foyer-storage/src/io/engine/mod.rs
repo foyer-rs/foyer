@@ -36,6 +36,7 @@ use pin_project::pin_project;
 use crate::io::{
     bytes::{IoB, IoBuf, IoBufMut},
     device::Partition,
+    media::Media,
 };
 
 #[cfg(not(feature = "tracing"))]
@@ -118,9 +119,9 @@ pub trait IoEngineConfig: Send + Sync + 'static + Debug {
 /// I/O engine builder trait.
 pub trait IoEngine: Send + Sync + 'static + Debug {
     /// Read data into the buffer from the specified partition and offset.
-    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
+    fn read(&self, buf: Box<dyn IoBufMut>, media: &Media, offset: u64) -> IoHandle;
     /// Write data from the buffer to the specified block and offset.
-    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle;
+    fn write(&self, buf: Box<dyn IoBuf>, media: &Media, offset: u64) -> IoHandle;
 }
 
 #[cfg(test)]

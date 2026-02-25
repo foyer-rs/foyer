@@ -16,9 +16,11 @@ use std::sync::{Arc, RwLock};
 
 use foyer_common::error::Result;
 
-use crate::{
-    RawFile,
-    io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+use crate::io::{
+    device::{
+        Device, DeviceBuilder, Partition, PartitionId, PartitionableDevice, statistics::Statistics, throttle::Throttle,
+    },
+    media::{Media, MediaBuilder},
 };
 
 /// Builder for a no-operation mock device.
@@ -69,12 +71,19 @@ impl Device for NoopDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for NoopDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let id = partitions.len() as PartitionId;
         let partition = Arc::new(NoopPartition {
             id,
             size,
+            iou: MediaBuilder::new().build(),
             statistics: self.statistics.clone(),
         });
         partitions.push(partition.clone());
@@ -88,16 +97,13 @@ impl Device for NoopDevice {
     fn partition(&self, id: super::PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
     }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
-    }
 }
 
 #[derive(Debug)]
 pub struct NoopPartition {
     id: PartitionId,
     size: usize,
+    iou: Media,
     statistics: Arc<Statistics>,
 }
 
@@ -106,6 +112,7 @@ impl Default for NoopPartition {
         Self {
             id: 0,
             size: 0,
+            iou: MediaBuilder::new().build(),
             statistics: Arc::new(Statistics::new(Throttle::default())),
         }
     }
@@ -120,8 +127,8 @@ impl Partition for NoopPartition {
         self.size
     }
 
-    fn translate(&self, _: u64) -> (RawFile, u64) {
-        (RawFile(0 as _), 0)
+    fn media(&self) -> &Media {
+        &self.iou
     }
 
     fn statistics(&self) -> &Arc<Statistics> {

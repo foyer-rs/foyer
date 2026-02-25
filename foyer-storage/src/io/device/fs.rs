@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    fs::{File, OpenOptions, create_dir_all},
+    fs::{OpenOptions, create_dir_all},
     path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
@@ -21,12 +21,12 @@ use std::{
 use foyer_common::error::{Error, Result};
 use fs4::free_space;
 
-use crate::{
-    RawFile,
-    io::{
-        PAGE,
-        device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics, throttle::Throttle},
+use crate::io::{
+    PAGE,
+    device::{
+        Device, DeviceBuilder, Partition, PartitionId, PartitionableDevice, statistics::Statistics, throttle::Throttle,
     },
+    media::{FileBuilder, Media, MediaBuilder},
 };
 
 /// Builder for a filesystem-based device that manages files in a directory.
@@ -136,6 +136,12 @@ impl Device for FsDevice {
         self.partitions.read().unwrap().iter().map(|p| p.size).sum()
     }
 
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
+    }
+}
+
+impl PartitionableDevice for FsDevice {
     fn create_partition(&self, size: usize) -> Result<Arc<dyn Partition>> {
         let mut partitions = self.partitions.write().unwrap();
         let allocated = partitions.iter().map(|p| p.size).sum::<usize>();
@@ -143,7 +149,8 @@ impl Device for FsDevice {
             return Err(Error::no_space(self.capacity, allocated, allocated + size));
         }
         let id = partitions.len() as PartitionId;
-        let path = self.dir.join(Self::filename(id));
+        let filename = Self::filename(id);
+        let path = self.dir.join(&filename);
         let mut opts = OpenOptions::new();
         opts.create(true).write(true).read(true);
         #[cfg(target_os = "linux")]
@@ -154,10 +161,15 @@ impl Device for FsDevice {
         let file = opts.open(path).map_err(Error::io_error)?;
         file.set_len(size as _).map_err(Error::io_error)?;
 
+        let media = MediaBuilder::new()
+            .with_name(filename)
+            .with_file(FileBuilder::new(file).with_offset(0).with_size(size).build())
+            .build();
+
         let partition = Arc::new(FsPartition {
             id,
             size,
-            file,
+            media,
             statistics: self.statistics.clone(),
         });
         partitions.push(partition.clone());
@@ -171,10 +183,6 @@ impl Device for FsDevice {
     fn partition(&self, id: PartitionId) -> Arc<dyn Partition> {
         self.partitions.read().unwrap()[id as usize].clone()
     }
-
-    fn statistics(&self) -> &Arc<Statistics> {
-        &self.statistics
-    }
 }
 
 #[derive(Debug)]
@@ -182,7 +190,7 @@ pub struct FsPartition {
     id: PartitionId,
     size: usize,
     statistics: Arc<Statistics>,
-    file: File,
+    media: Media,
 }
 
 impl Partition for FsPartition {
@@ -194,20 +202,8 @@ impl Partition for FsPartition {
         self.size
     }
 
-    fn translate(&self, address: u64) -> (RawFile, u64) {
-        #[cfg(any(target_family = "unix", target_family = "wasm"))]
-        let raw = {
-            use std::os::fd::AsRawFd;
-            RawFile(self.file.as_raw_fd())
-        };
-
-        #[cfg(target_family = "windows")]
-        let raw = {
-            use std::os::windows::io::AsRawHandle;
-            RawFile(self.file.as_raw_handle())
-        };
-
-        (raw, address)
+    fn media(&self) -> &Media {
+        &self.media
     }
 
     fn statistics(&self) -> &Arc<Statistics> {
