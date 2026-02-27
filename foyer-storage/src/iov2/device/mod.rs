@@ -12,23 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+use foyer_common::error::Result;
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
+use std::{any::Any, fmt::Debug, sync::Arc};
 
-mod compress;
-mod engine;
-mod filter;
-mod io;
-mod iov2;
-mod keeper;
-mod playground;
-mod serde;
-mod store;
+/// Device builder trait.
+pub trait DeviceBuilder: Send + Sync + 'static + Debug {
+    /// Build a device from the given configuration.
+    fn build(self) -> Result<Arc<dyn Device>>;
+}
 
-mod prelude;
-pub use prelude::*;
+/// Device trait.
+pub trait Device: Debug + Send + Sync + Any + 'static {}
 
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils;
+mod file;
+mod fs;
+mod utils;
