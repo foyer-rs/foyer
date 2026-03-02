@@ -20,7 +20,7 @@ use std::{any::Any, fmt::Debug, sync::Arc};
 
 use foyer_common::error::Result;
 
-use crate::io::device::statistics::Statistics;
+use crate::storage::volume::io::device_old::statistics::Statistics;
 
 pub type PartitionId = u32;
 
@@ -28,12 +28,14 @@ pub type PartitionId = u32;
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(any(target_family = "unix", target_family = "wasm"))]
+#[derive(Debug, Clone, Copy)]
 pub struct RawFile(pub std::os::fd::RawFd);
 
 /// Raw os file resource.
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(target_family = "windows")]
+#[derive(Debug, Clone, Copy)]
 pub struct RawFile(pub std::os::windows::io::RawHandle);
 
 unsafe impl Send for RawFile {}

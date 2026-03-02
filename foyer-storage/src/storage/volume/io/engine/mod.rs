@@ -33,9 +33,12 @@ use foyer_common::{error::Result, spawn::Spawner};
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::Partition,
+use crate::{
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::Partition,
+    },
+    storage::volume::io::device_old::RawFile,
 };
 
 #[cfg(not(feature = "tracing"))]
@@ -118,9 +121,9 @@ pub trait IoEngineConfig: Send + Sync + 'static + Debug {
 /// I/O engine builder trait.
 pub trait IoEngine: Send + Sync + 'static + Debug {
     /// Read data into the buffer from the specified partition and offset.
-    fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
+    fn read(&self, buf: Box<dyn IoBufMut>, raw: RawFile, offset: u64) -> IoHandle;
     /// Write data from the buffer to the specified block and offset.
-    fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle;
+    fn write(&self, buf: Box<dyn IoBuf>, raw: RawFile, offset: u64) -> IoHandle;
 }
 
 #[cfg(test)]
@@ -133,10 +136,10 @@ mod tests {
     use super::*;
     #[cfg(not(madsim))]
     #[cfg(target_os = "linux")]
-    use crate::io::engine::uring::UringIoEngineConfig;
-    use crate::io::{
+    use crate::storage::volume::io::engine::uring::UringIoEngineConfig;
+    use crate::storage::volume::io::{
         bytes::IoSliceMut,
-        device::{Device, DeviceBuilder, file::FileDeviceBuilder},
+        device_old::{Device, DeviceBuilder, file::FileDeviceBuilder},
         engine::psync::PsyncIoEngineConfig,
     };
 

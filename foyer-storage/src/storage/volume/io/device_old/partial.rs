@@ -16,7 +16,10 @@ use std::sync::{Arc, RwLock};
 
 use foyer_common::error::{Error, Result};
 
-use crate::io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics};
+use crate::{
+    io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics},
+    storage::volume::io::device_old::RawFile,
+};
 
 /// Builder for a partial device that wraps another device and allows access to only a subset of capacity.
 #[derive(Debug)]
@@ -117,7 +120,7 @@ impl Partition for PartialPartition {
         self.inner.size()
     }
 
-    fn translate(&self, address: u64) -> (super::RawFile, u64) {
+    fn translate(&self, address: u64) -> (RawFile, u64) {
         self.inner.translate(address)
     }
 

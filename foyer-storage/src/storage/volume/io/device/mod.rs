@@ -12,22 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A disk cache engine that serves as the disk cache backend of `foyer`.
+pub mod statistics;
+pub mod throttle;
+pub mod utils;
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
-#![cfg_attr(feature = "nightly", feature(write_all_vectored))]
-
-mod compress;
-mod engine;
-mod filter;
-mod io;
-mod keeper;
-mod serde;
-mod storage;
-mod store;
-
-mod prelude;
-pub use prelude::*;
-
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils;
+pub mod file;
