@@ -28,12 +28,14 @@ pub type PartitionId = u32;
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(any(target_family = "unix", target_family = "wasm"))]
+#[derive(Debug, Clone)]
 pub struct RawFile(pub std::os::fd::RawFd);
 
 /// Raw os file resource.
 ///
 /// Use `fd` with unix and wasm, use `handle` with windows.
 #[cfg(target_family = "windows")]
+#[derive(Debug, Clone)]
 pub struct RawFile(pub std::os::windows::io::RawHandle);
 
 unsafe impl Send for RawFile {}

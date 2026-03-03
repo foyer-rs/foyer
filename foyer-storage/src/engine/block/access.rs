@@ -12,15 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod buffer;
-pub mod engine;
-pub mod eviction;
-pub mod flusher;
-pub mod indexer;
-pub mod manager;
-pub mod reclaimer;
-pub mod recover;
-pub mod scanner;
-pub mod serde;
-pub mod tombstone;
-pub mod access;
+use std::sync::Arc;
+
+use crate::{
+    IoHandle,
+    io::{
+        bytes::{IoBuf, IoBufMut},
+        engine::IoHandleV2,
+    },
+};
+
+pub trait BlockEngineAccess: Send + Sync + 'static {
+    fn create_block(&self, size: usize) -> Arc<dyn BlockAccess>;
+}
+
+pub trait BlockAccess: Send + Sync + 'static {
+    fn write_at(&self, offset: u64, data: Box<dyn IoBuf>) -> IoHandleV2<Box<dyn IoBuf>>;
+
+    fn read_at(&self, offset: u64, data: Box<dyn IoBufMut>) -> IoHandleV2<Box<dyn IoBufMut>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ensure_object_safe(_: &dyn BlockEngineAccess) {}
+}

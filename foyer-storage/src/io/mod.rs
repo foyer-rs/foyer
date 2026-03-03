@@ -14,6 +14,7 @@
 
 pub mod bytes;
 pub mod device;
+pub mod device_v2;
 pub mod engine;
 
 pub const PAGE: usize = 4096;

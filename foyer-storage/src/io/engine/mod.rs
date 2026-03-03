@@ -33,9 +33,12 @@ use foyer_common::{error::Result, spawn::Spawner};
 use futures_core::future::BoxFuture;
 use pin_project::pin_project;
 
-use crate::io::{
-    bytes::{IoB, IoBuf, IoBufMut},
-    device::Partition,
+use crate::{
+    RawFile,
+    io::{
+        bytes::{IoB, IoBuf, IoBufMut},
+        device::Partition,
+    },
 };
 
 #[cfg(not(feature = "tracing"))]
@@ -95,6 +98,63 @@ impl Future for IoHandle {
     }
 }
 
+#[cfg(not(feature = "tracing"))]
+type IoHandleInnerV2<B> = BoxFuture<'static, (B, Result<()>)>;
+#[cfg(feature = "tracing")]
+type IoHandleInnerV2<B> = InSpan<BoxFuture<'static, (B, Result<()>)>>;
+/// A detached I/O handle that can be polled for completion.
+#[pin_project]
+pub struct IoHandleV2<B> {
+    #[pin]
+    inner: IoHandleInnerV2<B>,
+    callback: Option<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl<B> Debug for IoHandleV2<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IoHandle").finish()
+    }
+}
+
+#[cfg(not(feature = "tracing"))]
+impl<B> From<BoxFuture<'static, (B, Result<()>)>> for IoHandleV2 {
+    fn from(inner: BoxFuture<'static, (Box<dyn IoB>, Result<()>)>) -> Self {
+        Self { inner, callback: None }
+    }
+}
+
+#[cfg(feature = "tracing")]
+impl<B> From<BoxFuture<'static, (B, Result<()>)>> for IoHandleV2<B> {
+    fn from(inner: BoxFuture<'static, (B, Result<()>)>) -> Self {
+        let inner = inner.in_span(Span::enter_with_local_parent("foyer::storage::io::io_handle"));
+        Self { inner, callback: None }
+    }
+}
+
+impl<B> IoHandleV2<B> {
+    pub(crate) fn with_callback<F>(mut self, callback: F) -> Self
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        assert!(self.callback.is_none(), "io handle callback can only be set once");
+        self.callback = Some(Box::new(callback));
+        self
+    }
+}
+
+impl<B> Future for IoHandleV2<B> {
+    type Output = (B, Result<()>);
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = ready!(this.inner.poll(cx));
+        if let Some(callback) = this.callback.take() {
+            callback();
+        }
+        Poll::Ready(res)
+    }
+}
+
 /// Context for building the disk cache io engine.
 pub struct IoEngineBuildContext {
     /// The runtime for the disk cache engine.
@@ -121,6 +181,14 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle;
     /// Write data from the buffer to the specified block and offset.
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle;
+}
+
+/// I/O engine builder trait.
+pub trait IoEngineV2: Send + Sync + 'static + Debug {
+    /// Read data into the buffer from the specified partition and offset.
+    fn read(&self, buf: Box<dyn IoBufMut>, raw: RawFile, offset: u64) -> IoHandleV2<Box<dyn IoBufMut>>;
+    /// Write data from the buffer to the specified block and offset.
+    fn write(&self, buf: Box<dyn IoBuf>, raw: RawFile, offset: u64) -> IoHandleV2<Box<dyn IoBuf>>;
 }
 
 #[cfg(test)]
