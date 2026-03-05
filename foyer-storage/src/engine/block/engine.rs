@@ -58,6 +58,7 @@ use crate::{
             manager::{BlockId, BlockManager},
             reclaimer::{BlockCleaner, Reclaimer, ReclaimerTrait},
             serde::{AtomicSequence, EntryHeader},
+            storage::{BlockEngineStorage, BlockEngineStorageBuildCtx, BlockEngineStorageConfig},
             tombstone::{Tombstone, TombstoneLog},
         },
     },
@@ -82,6 +83,7 @@ where
     P: Properties,
 {
     device: Arc<dyn Device>,
+    storage_config: Box<dyn BlockEngineStorageConfig>,
     block_size: usize,
     compression: Compression,
     indexer_shards: usize,
@@ -112,6 +114,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BlockEngineConfig")
             .field("device", &self.device)
+            .field("storage_config", &self.storage_config)
             .field("block_size", &self.block_size)
             .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
@@ -137,9 +140,10 @@ where
     P: Properties,
 {
     /// Create a new block-based disk cache engine builder with default configurations.
-    pub fn new(device: Arc<dyn Device>) -> Self {
+    pub fn new(device: Arc<dyn Device>, storage_config: impl BlockEngineStorageConfig) -> Self {
         Self {
             device,
+            storage_config: storage_config.boxed(),
             block_size: 16 * 1024 * 1024, // 16 MiB
             compression: Compression::default(),
             indexer_shards: 64,
@@ -333,11 +337,18 @@ where
         let device = self.device;
         let block_size = self.block_size;
 
+        let storage = self
+            .storage_config
+            .build(BlockEngineStorageBuildCtx {
+                metrics: metrics.clone(),
+            })
+            .await?;
+
         let mut tombstones = vec![];
 
         let tombstone_log = if self.enable_tombstone_log {
             // TODO(MrCroxx): The tombstone log support multiples partitions for multiple device support.
-            let mut partitions = vec![];
+            let mut block_storages = vec![];
 
             let max_entries = device.capacity() / PAGE;
             let pages = max_entries / TombstoneLog::SLOTS_PER_PAGE
@@ -346,10 +357,10 @@ where
                 } else {
                     0
                 };
-            let partition = device.create_partition(pages * PAGE)?;
-            partitions.push(partition);
+            let bs = storage.create_block(pages * PAGE)?;
+            block_storages.push(bs);
 
-            let tombstone_log = TombstoneLog::open(partitions, io_engine.clone(), &mut tombstones).await?;
+            let tombstone_log = TombstoneLog::open(block_storages, io_engine.clone(), &mut tombstones).await?;
             Some(tombstone_log)
         } else {
             None
@@ -432,7 +443,7 @@ where
 
         let inner = BlockEngineInner {
             admission_filter,
-            device,
+            storage,
             indexer,
             block_manager,
             flushers,
@@ -505,7 +516,7 @@ where
 {
     admission_filter: StorageFilter,
 
-    device: Arc<dyn Device>,
+    storage: Arc<dyn BlockEngineStorage>,
 
     indexer: Indexer,
     block_manager: BlockManager,
@@ -810,7 +821,7 @@ where
     fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult {
         self.inner
             .admission_filter
-            .filter(self.inner.device.statistics(), hash, estimated_size)
+            .filter(self.inner.storage.statistics(), hash, estimated_size)
     }
 
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {

@@ -20,7 +20,11 @@ use mea::mutex::Mutex;
 
 use crate::{
     IoEngine,
-    io::{PAGE, bytes::IoSliceMut, device::Partition},
+    engine::block::storage::BlockStorage,
+    io::{
+        PAGE,
+        bytes::{IoB, IoSliceMut},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -65,17 +69,17 @@ impl TombstoneLog {
     ///
     /// The tombstone log will
     pub async fn open(
-        partitions: Vec<Arc<dyn Partition>>,
+        block_storages: Vec<Arc<dyn BlockStorage>>,
         io_engine: Arc<dyn IoEngine>,
         tombstones: &mut Vec<Tombstone>,
     ) -> Result<Self> {
         let mut recovered = vec![];
 
-        for partition in partitions.iter() {
-            for offset in (0..partition.size()).step_by(PAGE) {
+        for block_storage in block_storages.iter() {
+            for offset in (0..block_storage.size()).step_by(PAGE) {
                 tracing::trace!(offset, "[tombstone log]: recover at");
                 let buf = IoSliceMut::new(PAGE);
-                let (buffer, res) = io_engine.read(Box::new(buf), partition.as_ref(), offset as u64).await;
+                let (buffer, res) = block_storage.read_at(Box::new(buf), offset as u64).await;
                 res?;
 
                 let mut seq = 0;
@@ -117,10 +121,10 @@ impl TombstoneLog {
                 + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::serialized_len()
         };
 
-        let pages = partitions.iter().map(|p| p.size()).sum::<usize>() / PAGE;
+        let pages = block_storages.iter().map(|bs| bs.size()).sum::<usize>() / PAGE;
         let slot = latest_tombstone_slot + 1;
         let (page, _) = Self::calculate_slot_addr(pages, slot);
-        let buffer = PageBuffer::open(io_engine, partitions, page as _).await?;
+        let buffer = PageBuffer::open(io_engine, block_storages, page as _).await?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(TombstoneLogInner { buffer, slot })),
@@ -167,7 +171,7 @@ pub struct PageBuffer {
     buffer: Option<IoSliceMut>,
 
     io_engine: Arc<dyn IoEngine>,
-    partitions: Vec<Arc<dyn Partition>>,
+    block_storages: Vec<Arc<dyn BlockStorage>>,
     page: u32,
 }
 
@@ -184,11 +188,15 @@ impl AsMut<[u8]> for PageBuffer {
 }
 
 impl PageBuffer {
-    pub async fn open(io_engine: Arc<dyn IoEngine>, partitions: Vec<Arc<dyn Partition>>, page: u32) -> Result<Self> {
+    pub async fn open(
+        io_engine: Arc<dyn IoEngine>,
+        block_storages: Vec<Arc<dyn BlockStorage>>,
+        page: u32,
+    ) -> Result<Self> {
         let mut this = Self {
             buffer: Some(IoSliceMut::new(PAGE)),
             io_engine,
-            partitions,
+            block_storages,
             page,
         };
 
@@ -199,11 +207,9 @@ impl PageBuffer {
 
     pub async fn update(&mut self) -> Result<()> {
         let buf = self.buffer.take().unwrap();
-        let (partition, offset) = self.locate(self.page);
-        let (buf, res) = self
-            .io_engine
-            .read(Box::new(buf), self.partitions[partition].as_ref(), offset)
-            .await;
+        let (bs, offset) = self.locate(self.page);
+        let (buf, res) = self.block_storages[bs].read_at(Box::new(buf), offset).await;
+        let buf: Box<dyn IoB> = buf;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
         res?;
@@ -219,11 +225,9 @@ impl PageBuffer {
     pub async fn flush(&mut self) -> Result<()> {
         tracing::trace!(page = self.page, "[tombstone log page buffer]: flush page");
         let buf = self.buffer.take().unwrap();
-        let (partition, offset) = self.locate(self.page);
-        let (buf, res) = self
-            .io_engine
-            .write(Box::new(buf), self.partitions[partition].as_ref(), offset)
-            .await;
+        let (bs, offset) = self.locate(self.page);
+        let (buf, res) = self.block_storages[bs].write_at(Box::new(buf), offset).await;
+        let buf: Box<dyn IoB> = buf;
         let buf = *buf.try_into_io_slice_mut().unwrap();
         self.buffer = Some(buf);
         res?;
@@ -234,7 +238,7 @@ impl PageBuffer {
         let mut partition = 0;
 
         loop {
-            let partition_pages = self.partitions[partition].size() as u32 / PAGE as u32;
+            let partition_pages = self.block_storages[partition].size() as u32 / PAGE as u32;
             if page < partition_pages {
                 break (partition, PAGE as u64 * page as u64);
             }

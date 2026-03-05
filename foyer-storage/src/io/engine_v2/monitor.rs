@@ -1,0 +1,98 @@
+// Copyright 2026 foyer Project Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::{fmt::Debug, sync::Arc, time::Instant};
+
+use foyer_common::metrics::Metrics;
+
+use crate::{
+    RawFile, Statistics,
+    io::{
+        bytes::{IoBuf, IoBufMut},
+        engine_v2::{IoEngine, IoHandle},
+    },
+};
+
+#[derive(Debug)]
+struct Inner {
+    io_engine: Arc<dyn IoEngine>,
+    metrics: Arc<Metrics>,
+    statistics: Arc<Statistics>,
+}
+
+#[derive(Clone)]
+pub struct MonitoredIoEngine {
+    inner: Arc<Inner>,
+}
+
+impl MonitoredIoEngine {
+    pub fn new(io_engine: Arc<dyn IoEngine>, metrics: Arc<Metrics>, statistics: Arc<Statistics>) -> Arc<Self> {
+        let inner = Inner {
+            io_engine,
+            metrics,
+            statistics,
+        };
+        Arc::new(Self { inner: Arc::new(inner) })
+    }
+}
+
+impl Debug for MonitoredIoEngine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MonitoredIoEngine")
+            .field("engine", &self.inner.io_engine)
+            .finish()
+    }
+}
+
+impl IoEngine for MonitoredIoEngine {
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::monitor::read")
+    )]
+    fn read(&self, buf: Box<dyn IoBufMut>, raw: RawFile, offset: u64) -> IoHandle<Box<dyn IoBufMut>> {
+        let now = Instant::now();
+        let bytes = buf.len();
+
+        let statistics = self.inner.statistics.clone();
+        let metrics = self.inner.metrics.clone();
+        let handle = self.inner.io_engine.read(buf, raw, offset);
+
+        handle.with_callback(move || {
+            statistics.record_disk_read(bytes);
+            metrics.storage_disk_read.increase(1);
+            metrics.storage_disk_read_bytes.increase(bytes as u64);
+            metrics.storage_disk_read_duration.record(now.elapsed().as_secs_f64());
+        })
+    }
+
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::storage::io::engine::monitor::write")
+    )]
+    fn write(&self, buf: Box<dyn IoBuf>, raw: RawFile, offset: u64) -> IoHandle<Box<dyn IoBuf>> {
+        let now = Instant::now();
+        let bytes = buf.len();
+
+        let statistics = self.inner.statistics.clone();
+        let metrics = self.inner.metrics.clone();
+        let handle = self.inner.io_engine.write(buf, raw, offset);
+
+        handle.with_callback(move || {
+            statistics.record_disk_write(bytes);
+            metrics.storage_disk_write.increase(1);
+            metrics.storage_disk_write_bytes.increase(bytes as u64);
+            metrics.storage_disk_write_duration.record(now.elapsed().as_secs_f64());
+        })
+    }
+}
