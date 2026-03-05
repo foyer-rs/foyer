@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    fmt::Debug,
-    hash::Hash,
-    sync::Arc,
-    time::Instant,
-};
+use std::{any::Any, borrow::Cow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
 
 use equivalent::Equivalent;
 use foyer_common::{
@@ -313,7 +306,7 @@ where
 
     /// If the disk cache is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.inner.engine.type_id() != TypeId::of::<Arc<NoopEngine<K, V, P>>>()
+        !(self.inner.engine.as_ref() as &dyn Any).is::<NoopEngine<K, V, P>>()
     }
 }
 
