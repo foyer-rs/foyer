@@ -12,12 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod bytes;
-pub mod device;
-pub mod device_v2;
-pub mod engine;
-pub mod engine_v2;
-pub mod file;
-pub mod storage;
-
-pub const PAGE: usize = 4096;
+pub trait Storage: Send + Sync + 'static {}
