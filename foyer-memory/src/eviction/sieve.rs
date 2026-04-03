@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use super::{Eviction, Op};
 use crate::record::Record;
 
+/// Sieve eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SieveConfig;
 
