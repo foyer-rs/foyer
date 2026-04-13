@@ -15,6 +15,7 @@
 use std::{
     fmt::Debug,
     future::Future,
+    hash::Hash,
     marker::PhantomData,
     sync::{
         Arc,
@@ -23,6 +24,7 @@ use std::{
     time::Instant,
 };
 
+use equivalent::Equivalent;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
 use foyer_common::{
@@ -460,19 +462,10 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>> {
-        async move { self.build(ctx).await.map(|e| e as Arc<dyn Engine<K, V, P>>) }.boxed()
-    }
-}
+    type Engine = BlockEngine<K, V, P>;
 
-impl<K, V, P> From<BlockEngineConfig<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-    fn from(builder: BlockEngineConfig<K, V, P>) -> Self {
-        builder.boxed()
+    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<BlockEngine<K, V, P>>>> {
+        async move { self.build(ctx).await }.boxed()
     }
 }
 
@@ -549,23 +542,18 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn wait(&self) -> impl Future<Output = ()> + Send + 'static {
-        let flushers = self.inner.flushers.clone();
-        let block_manager = self.inner.block_manager.clone();
+    fn wait(&self) -> impl Future<Output = ()> + Send + '_ {
+        let inner = &self.inner;
         async move {
-            join_all(flushers.iter().map(|flusher| flusher.wait())).await;
-            block_manager.wait_reclaim().await;
+            join_all(inner.flushers.iter().map(|flusher| flusher.wait())).await;
+            inner.block_manager.wait_reclaim().await;
         }
     }
 
-    fn close(&self) -> BoxFuture<'static, Result<()>> {
-        let this = self.clone();
-        async move {
-            this.inner.active.store(false, Ordering::Relaxed);
-            this.wait().await;
-            Ok(())
-        }
-        .boxed()
+    async fn close(&self) -> Result<()> {
+        self.inner.active.store(false, Ordering::Relaxed);
+        self.wait().await;
+        Ok(())
     }
 
     #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::engine::enqueue"))]
@@ -603,21 +591,22 @@ where
         });
     }
 
-    fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
+    fn load<'a, Q>(&'a self, hash: u64, key: &'a Q) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'a
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
         tracing::trace!(hash, "[block engine]: load");
 
         #[cfg(any(test, feature = "test_utils"))]
         let load_holer = self.inner.load_holder.wait();
 
-        let indexer = self.inner.indexer.clone();
-        let metrics = self.inner.metrics.clone();
-        let block_manager = self.inner.block_manager.clone();
+        let inner = &self.inner;
 
         let load = async move {
             #[cfg(any(test, feature = "test_utils"))]
             load_holer.await;
 
-            let addr = match indexer.get(hash) {
+            let addr = match inner.indexer.get(hash) {
                 Some(addr) => addr,
                 None => {
                     return Ok(Load::Miss);
@@ -626,7 +615,7 @@ where
 
             tracing::trace!(hash, ?addr, "[block engine]: load");
 
-            let block = block_manager.block(addr.block);
+            let block = inner.block_manager.block(addr.block);
             if block.partition().statistics().is_read_throttled() {
                 return Ok(Load::Throttled);
             }
@@ -655,7 +644,7 @@ where
                                 ?e,
                                 "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
                             );
-                            indexer.remove(hash);
+                            inner.indexer.remove(hash);
                             Ok(Load::Miss)
                         }
                         _ => {
@@ -666,7 +655,7 @@ where
                 }
             };
 
-            let (key, value) = {
+            let (k, value) = {
                 let now = Instant::now();
                 let res = match EntryDeserializer::deserialize::<K, V>(
                     &buf[EntryHeader::serialized_len()..],
@@ -686,7 +675,7 @@ where
                                     ?e,
                                     "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
                                 );
-                                indexer.remove(hash);
+                                inner.indexer.remove(hash);
                                 Ok(Load::Miss)
                             }
                             _ => {
@@ -696,11 +685,17 @@ where
                         };
                     }
                 };
-                metrics
+                inner
+                    .metrics
                     .storage_entry_deserialize_duration
                     .record(now.elapsed().as_secs_f64());
                 res
             };
+
+            if !key.equivalent(&k) {
+                inner.metrics.storage_false_positive.increase(1);
+                return Ok(Load::Miss);
+            }
 
             let age = match block.statistics().probation.load(Ordering::Relaxed) {
                 true => Age::Old,
@@ -708,7 +703,7 @@ where
             };
 
             Ok(Load::Entry {
-                key,
+                key: k,
                 value,
                 populated: Populated { age },
             })
@@ -720,7 +715,10 @@ where
         load
     }
 
-    fn delete(&self, hash: u64) {
+    fn delete<Q>(&self, hash: u64, _key: &Q)
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot delete entry after closed");
             return;
@@ -744,53 +742,54 @@ where
         });
     }
 
-    fn may_contains(&self, hash: u64) -> bool {
+    fn may_contains<Q>(&self, hash: u64, _key: &Q) -> bool
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
         self.inner.indexer.get(hash).is_some()
     }
 
-    fn destroy(&self) -> BoxFuture<'static, Result<()>> {
-        let this = self.clone();
-        async move {
-            if !this.inner.active.load(Ordering::Relaxed) {
-                return Err(Error::new(ErrorKind::Closed, "cannot delete entry after closed"));
-            }
-
-            // Write a tombstone to clear tombstone log by increase the max sequence.
-            let sequence = this.inner.sequence.fetch_add(1, Ordering::Relaxed);
-
-            this.inner.flushers[0].submit(Submission::Tombstone {
-                tombstone: Tombstone { hash: 0, sequence },
-                stats: None,
-            });
-            this.wait().await;
-
-            // Clear indices.
-            //
-            // This step must perform after the latest writer finished,
-            // otherwise the indices of the latest batch cannot be cleared.
-            this.inner.indexer.clear();
-
-            // Clean blocks.
-            try_join_all((0..this.inner.block_manager.blocks() as BlockId).map(|id| {
-                let block = this.inner.block_manager.block(id).clone();
-                async move {
-                    let res = BlockCleaner::clean(&block).await;
-                    block.statistics().reset();
-                    res
-                }
-            }))
-            .await?;
-
-            Ok(())
+    async fn destroy(&self) -> Result<()> {
+        if !self.inner.active.load(Ordering::Relaxed) {
+            return Err(Error::new(ErrorKind::Closed, "cannot delete entry after closed"));
         }
-        .boxed()
+
+        // Write a tombstone to clear tombstone log by increase the max sequence.
+        let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
+
+        self.inner.flushers[0].submit(Submission::Tombstone {
+            tombstone: Tombstone { hash: 0, sequence },
+            stats: None,
+        });
+        self.wait().await;
+
+        // Clear indices.
+        //
+        // This step must perform after the latest writer finished,
+        // otherwise the indices of the latest batch cannot be cleared.
+        self.inner.indexer.clear();
+
+        // Clean blocks.
+        try_join_all((0..self.inner.block_manager.blocks() as BlockId).map(|id| {
+            let block = self.inner.block_manager.block(id).clone();
+            async move {
+                let res = BlockCleaner::clean(&block).await;
+                block.statistics().reset();
+                res
+            }
+        }))
+        .await?;
+
+        Ok(())
     }
 
+    /// Hold flush operations for testing.
     #[cfg(any(test, feature = "test_utils"))]
     pub fn hold_flush(&self) {
         self.inner.flush_switch.on();
     }
 
+    /// Unhold flush operations for testing.
     #[cfg(any(test, feature = "test_utils"))]
     pub fn unhold_flush(&self) {
         self.inner.flush_switch.off();
@@ -817,29 +816,36 @@ where
         self.enqueue(piece, estimated_size);
     }
 
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
-        // TODO(MrCroxx): refactor this.
-        self.load(hash).boxed()
+    fn load<'a, Q>(&'a self, hash: u64, key: &'a Q) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'a
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
+        self.load(hash, key)
     }
 
-    fn delete(&self, hash: u64) {
-        self.delete(hash);
+    fn delete<Q>(&self, hash: u64, key: &Q)
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
+        self.delete(hash, key);
     }
 
-    fn may_contains(&self, hash: u64) -> bool {
-        self.may_contains(hash)
+    fn may_contains<Q>(&self, hash: u64, key: &Q) -> bool
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
+        self.may_contains(hash, key)
     }
 
-    fn destroy(&self) -> BoxFuture<'static, Result<()>> {
+    fn destroy(&self) -> impl Future<Output = Result<()>> + Send + '_ {
         self.destroy()
     }
 
-    fn wait(&self) -> BoxFuture<'static, ()> {
-        // TODO(MrCroxx): refactor this.
-        self.wait().boxed()
+    fn wait(&self) -> impl Future<Output = ()> + Send + '_ {
+        self.wait()
     }
 
-    fn close(&self) -> BoxFuture<'static, Result<()>> {
+    fn close(&self) -> impl Future<Output = Result<()>> + Send + '_ {
         self.close()
     }
 }
@@ -1000,9 +1006,9 @@ mod tests {
         store.unhold_flush();
         store.wait().await;
 
-        let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
+        let r1 = store.load(memory.hash(&1), &1).await.unwrap().kv().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
+        let r2 = store.load(memory.hash(&2), &2).await.unwrap().kv().unwrap();
         assert_eq!(r2, (2, vec![2; 3 * KB]));
 
         // [ [e1, e2], [e3, e4], [], [] ]
@@ -1014,13 +1020,13 @@ mod tests {
         store.unhold_flush();
         store.wait().await;
 
-        let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
+        let r1 = store.load(memory.hash(&1), &1).await.unwrap().kv().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
+        let r2 = store.load(memory.hash(&2), &2).await.unwrap().kv().unwrap();
         assert_eq!(r2, (2, vec![2; 3 * KB]));
-        let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
+        let r3 = store.load(memory.hash(&3), &3).await.unwrap().kv().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
+        let r4 = store.load(memory.hash(&4), &4).await.unwrap().kv().unwrap();
         assert_eq!(r4, (4, vec![4; 2 * KB]));
 
         // [ [e1, e2], [e3, e4], [e5], [] ]
@@ -1028,15 +1034,15 @@ mod tests {
         enqueue(&store, e5);
         store.wait().await;
 
-        let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
+        let r1 = store.load(memory.hash(&1), &1).await.unwrap().kv().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
-        let r2 = store.load(memory.hash(&2)).await.unwrap().kv().unwrap();
+        let r2 = store.load(memory.hash(&2), &2).await.unwrap().kv().unwrap();
         assert_eq!(r2, (2, vec![2; 3 * KB]));
-        let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
+        let r3 = store.load(memory.hash(&3), &3).await.unwrap().kv().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
+        let r4 = store.load(memory.hash(&4), &4).await.unwrap().kv().unwrap();
         assert_eq!(r4, (4, vec![4; 2 * KB]));
-        let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
+        let r5 = store.load(memory.hash(&5), &5).await.unwrap().kv().unwrap();
         assert_eq!(r5, (5, vec![5; 11 * KB]));
 
         // [ [], [e3, e4], [e5], [e6, e4*] ]
@@ -1048,15 +1054,15 @@ mod tests {
         store.unhold_flush();
         store.wait().await;
 
-        assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
-        assert!(store.load(memory.hash(&2)).await.unwrap().kv().is_none());
-        let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
+        assert!(store.load(memory.hash(&1), &1).await.unwrap().kv().is_none());
+        assert!(store.load(memory.hash(&2), &2).await.unwrap().kv().is_none());
+        let r3 = store.load(memory.hash(&3), &3).await.unwrap().kv().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
+        let r4v2 = store.load(memory.hash(&4), &4).await.unwrap().kv().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
-        let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
+        let r5 = store.load(memory.hash(&5), &5).await.unwrap().kv().unwrap();
         assert_eq!(r5, (5, vec![5; 11 * KB]));
-        let r6 = store.load(memory.hash(&6)).await.unwrap().kv().unwrap();
+        let r6 = store.load(memory.hash(&6), &6).await.unwrap().kv().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
 
         store.close().await.unwrap();
@@ -1067,15 +1073,15 @@ mod tests {
 
         let store = engine_for_test(dir.path()).await;
 
-        assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
-        assert!(store.load(memory.hash(&2)).await.unwrap().kv().is_none());
-        let r3 = store.load(memory.hash(&3)).await.unwrap().kv().unwrap();
+        assert!(store.load(memory.hash(&1), &1).await.unwrap().kv().is_none());
+        assert!(store.load(memory.hash(&2), &2).await.unwrap().kv().is_none());
+        let r3 = store.load(memory.hash(&3), &3).await.unwrap().kv().unwrap();
         assert_eq!(r3, (3, vec![3; 7 * KB]));
-        let r4v2 = store.load(memory.hash(&4)).await.unwrap().kv().unwrap();
+        let r4v2 = store.load(memory.hash(&4), &4).await.unwrap().kv().unwrap();
         assert_eq!(r4v2, (4, vec![!4; 3 * KB]));
-        let r5 = store.load(memory.hash(&5)).await.unwrap().kv().unwrap();
+        let r5 = store.load(memory.hash(&5), &5).await.unwrap().kv().unwrap();
         assert_eq!(r5, (5, vec![5; 11 * KB]));
-        let r6 = store.load(memory.hash(&6)).await.unwrap().kv().unwrap();
+        let r6 = store.load(memory.hash(&6), &6).await.unwrap().kv().unwrap();
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
@@ -1096,14 +1102,14 @@ mod tests {
 
         for i in 0..9 {
             assert_eq!(
-                store.load(memory.hash(&i)).await.unwrap().kv(),
+                store.load(memory.hash(&i), &i).await.unwrap().kv(),
                 Some((i, vec![i as u8; 3 * KB]))
             );
         }
 
-        store.delete(memory.hash(&3));
+        store.delete(memory.hash(&3), &3);
         store.wait().await;
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap().kv(), None);
+        assert_eq!(store.load(memory.hash(&3), &3).await.unwrap().kv(), None);
 
         store.close().await.unwrap();
         drop(store);
@@ -1112,18 +1118,18 @@ mod tests {
         for i in 0..9 {
             if i != 3 {
                 assert_eq!(
-                    store.load(memory.hash(&i)).await.unwrap().kv(),
+                    store.load(memory.hash(&i), &i).await.unwrap().kv(),
                     Some((i, vec![i as u8; 3 * KB]))
                 );
             } else {
-                assert_eq!(store.load(memory.hash(&3)).await.unwrap().kv(), None);
+                assert_eq!(store.load(memory.hash(&3), &3).await.unwrap().kv(), None);
             }
         }
 
         enqueue(&store, es[3].clone());
         store.wait().await;
         assert_eq!(
-            store.load(memory.hash(&3)).await.unwrap().kv(),
+            store.load(memory.hash(&3), &3).await.unwrap().kv(),
             Some((3, vec![3; 3 * KB]))
         );
 
@@ -1133,7 +1139,7 @@ mod tests {
         let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         assert_eq!(
-            store.load(memory.hash(&3)).await.unwrap().kv(),
+            store.load(memory.hash(&3), &3).await.unwrap().kv(),
             Some((3, vec![3; 3 * KB]))
         );
     }
@@ -1157,14 +1163,14 @@ mod tests {
 
         for i in 0..9 {
             assert_eq!(
-                store.load(memory.hash(&i)).await.unwrap().kv(),
+                store.load(memory.hash(&i), &i).await.unwrap().kv(),
                 Some((i, vec![i as u8; 3 * KB]))
             );
         }
 
-        store.delete(memory.hash(&3));
+        store.delete(memory.hash(&3), &3);
         store.wait().await;
-        assert_eq!(store.load(memory.hash(&3)).await.unwrap().kv(), None);
+        assert_eq!(store.load(memory.hash(&3), &3).await.unwrap().kv(), None);
 
         store.destroy().await.unwrap();
 
@@ -1173,13 +1179,13 @@ mod tests {
 
         let store = store_for_test_with_tombstone_log(dir.path()).await;
         for i in 0..9 {
-            assert_eq!(store.load(memory.hash(&i)).await.unwrap().kv(), None);
+            assert_eq!(store.load(memory.hash(&i), &i).await.unwrap().kv(), None);
         }
 
         enqueue(&store, es[3].clone());
         store.wait().await;
         assert_eq!(
-            store.load(memory.hash(&3)).await.unwrap().kv(),
+            store.load(memory.hash(&3), &3).await.unwrap().kv(),
             Some((3, vec![3; 3 * KB]))
         );
 
@@ -1189,7 +1195,7 @@ mod tests {
         let store = store_for_test_with_tombstone_log(dir.path()).await;
 
         assert_eq!(
-            store.load(memory.hash(&3)).await.unwrap().kv(),
+            store.load(memory.hash(&3), &3).await.unwrap().kv(),
             Some((3, vec![3; 3 * KB]))
         );
     }
@@ -1234,7 +1240,7 @@ mod tests {
         }
 
         for i in 0..9 {
-            let r = store.load(memory.hash(&i)).await.unwrap().kv().unwrap();
+            let r = store.load(memory.hash(&i), &i).await.unwrap().kv().unwrap();
             assert_eq!(r, (i, vec![i as u8; 3 * KB]));
         }
 
@@ -1244,7 +1250,7 @@ mod tests {
         store.wait().await;
         let mut res = vec![];
         for i in 0..11 {
-            res.push(store.load(memory.hash(&i)).await.unwrap().kv());
+            res.push(store.load(memory.hash(&i), &i).await.unwrap().kv());
         }
         assert_eq!(
             res,
@@ -1268,7 +1274,7 @@ mod tests {
         store.wait().await;
         let mut res = vec![];
         for i in 0..12 {
-            res.push(store.load(memory.hash(&i)).await.unwrap().kv());
+            res.push(store.load(memory.hash(&i), &i).await.unwrap().kv());
         }
         assert_eq!(
             res,
@@ -1289,7 +1295,7 @@ mod tests {
         );
 
         // [[(11), (3), (5)], [(12), (13), (14)], [], [(9), (10), (1)]]
-        store.delete(memory.hash(&7));
+        store.delete(memory.hash(&7), &7);
         store.wait().await;
         enqueue(&store, es[12].clone());
         store.wait().await;
@@ -1299,7 +1305,7 @@ mod tests {
         store.wait().await;
         let mut res = vec![];
         for i in 0..15 {
-            res.push(store.load(memory.hash(&i)).await.unwrap().kv());
+            res.push(store.load(memory.hash(&i), &i).await.unwrap().kv());
         }
         assert_eq!(
             res,
@@ -1336,7 +1342,7 @@ mod tests {
         store.wait().await;
 
         // check entry 1
-        let r1 = store.load(memory.hash(&1)).await.unwrap().kv().unwrap();
+        let r1 = store.load(memory.hash(&1), &1).await.unwrap().kv().unwrap();
         assert_eq!(r1, (1, vec![1; 7 * KB]));
 
         // corrupt entry and header
@@ -1359,7 +1365,7 @@ mod tests {
             }
         }
 
-        assert!(store.load(memory.hash(&1)).await.unwrap().kv().is_none());
+        assert!(store.load(memory.hash(&1), &1).await.unwrap().kv().is_none());
     }
 
     #[test_log::test(tokio::test)]
@@ -1390,9 +1396,7 @@ mod tests {
             .with_device(d3)
             .build()
             .unwrap();
-        let engine = BlockEngineConfig::<u64, Vec<u8>, TestProperties>::new(device)
-            .with_block_size(64 * KB)
-            .boxed()
+        let engine = Box::new(BlockEngineConfig::<u64, Vec<u8>, TestProperties>::new(device).with_block_size(64 * KB))
             .build(EngineBuildContext {
                 io_engine,
                 metrics: Arc::new(Metrics::noop()),

@@ -36,11 +36,11 @@ pub use crate::{
         LruConfig, S3FifoConfig, Weighter,
     },
     storage::{
-        AdmitAll, Block, BlockEngineConfig, BlockStatistics, CombinedDeviceBuilder, Compression, Device, DeviceBuilder,
-        Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker, FifoPicker,
-        FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineConfig, IoHandle, IopsCounter, Load,
-        NoopDeviceBuilder, NoopIoEngine, NoopIoEngineConfig, PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineConfig,
-        RawFile, RecoverMode, RejectAll, Statistics, StorageFilter, StorageFilterCondition, StorageFilterResult, Store,
-        StoreBuilder, Throttle,
+        AdmitAll, Block, BlockEngine, BlockEngineConfig, BlockStatistics, CombinedDeviceBuilder, Compression, Device,
+        DeviceBuilder, Engine, EngineBuildContext, EngineConfig, EstimatedSize, EvictionInfo, EvictionPicker,
+        FifoPicker, FileDeviceBuilder, FsDeviceBuilder, InvalidRatioPicker, IoEngine, IoEngineConfig, IoHandle,
+        IopsCounter, Load, NoopDeviceBuilder, NoopEngine, NoopEngineConfig, NoopIoEngine, NoopIoEngineConfig,
+        PartialDeviceBuilder, PsyncIoEngine, PsyncIoEngineConfig, RawFile, RecoverMode, RejectAll, Statistics,
+        StorageFilter, StorageFilterCondition, StorageFilterResult, Store, StoreBuilder, Throttle,
     },
 };

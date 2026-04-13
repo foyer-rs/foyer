@@ -40,10 +40,9 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineConfig;
 use foyer::{
-    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
-    FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
-    InvalidRatioPicker, IoEngineConfig, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineConfig, RecoverMode,
-    S3FifoConfig, Spawner, Throttle, TracingOptions,
+    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, FifoConfig, FifoPicker, FileDeviceBuilder,
+    FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, InvalidRatioPicker, IoEngineConfig, LfuConfig,
+    LruConfig, NoopDeviceBuilder, PsyncIoEngineConfig, RecoverMode, S3FifoConfig, Spawner, Throttle, TracingOptions,
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
@@ -606,7 +605,7 @@ async fn benchmark(args: Args) {
         _ => unreachable!(),
     };
 
-    let engine_config: Box<dyn EngineConfig<u64, Value, HybridCacheProperties>> = {
+    let engine_config = {
         let mut builder = BlockEngineConfig::new(device)
             .with_block_size(args.block_size.as_u64() as _)
             .with_indexer_shards(args.shards)
@@ -623,8 +622,7 @@ async fn benchmark(args: Args) {
             builder = builder.with_clean_block_threshold(args.clean_block_threshold);
         }
         builder
-    }
-    .boxed();
+    };
 
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())

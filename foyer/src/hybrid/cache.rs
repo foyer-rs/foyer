@@ -41,7 +41,7 @@ use foyer_common::{
     rate::RateLimiter,
 };
 use foyer_memory::{Cache, CacheEntry, FetchTarget, GetOrFetch, Piece, Pipe};
-use foyer_storage::{Load, Populated, Statistics, Store};
+use foyer_storage::{BlockEngine, Engine, Load, Populated, Statistics, Store};
 use futures_util::FutureExt as _;
 use pin_project::pin_project;
 use serde::{Deserialize, Serialize};
@@ -183,42 +183,46 @@ pub enum HybridCachePolicy {
     WriteOnInsertion,
 }
 
-pub struct HybridCachePipe<K, V, S>
+pub struct HybridCachePipe<K, V, S, E = BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    store: Store<K, V, S, HybridCacheProperties>,
+    store: Store<K, V, S, HybridCacheProperties, E>,
 }
 
-impl<K, V, S> Debug for HybridCachePipe<K, V, S>
+impl<K, V, S, E> Debug for HybridCachePipe<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridCachePipe").finish()
     }
 }
 
-impl<K, V, S> HybridCachePipe<K, V, S>
+impl<K, V, S, E> HybridCachePipe<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    pub fn new(store: Store<K, V, S, HybridCacheProperties>) -> Self {
+    pub fn new(store: Store<K, V, S, HybridCacheProperties, E>) -> Self {
         Self { store }
     }
 }
 
-impl<K, V, S> Pipe for HybridCachePipe<K, V, S>
+impl<K, V, S, E> Pipe for HybridCachePipe<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     type Key = K;
     type Value = V;
@@ -285,11 +289,12 @@ impl Default for HybridCacheOptions {
     }
 }
 
-struct Inner<K, V, S = DefaultHasher>
+struct Inner<K, V, S = DefaultHasher, E = BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     name: Cow<'static, str>,
     policy: HybridCachePolicy,
@@ -297,23 +302,24 @@ where
     metrics: Arc<Metrics>,
     closed: Arc<AtomicBool>,
     memory: Cache<K, V, S, HybridCacheProperties>,
-    storage: Store<K, V, S, HybridCacheProperties>,
+    storage: Store<K, V, S, HybridCacheProperties, E>,
     #[cfg(feature = "tracing")]
     tracing: std::sync::atomic::AtomicBool,
     #[cfg(feature = "tracing")]
     tracing_config: TracingConfig,
 }
 
-impl<K, V, S> Inner<K, V, S>
+impl<K, V, S, E> Inner<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     async fn close_inner(
         closed: Arc<AtomicBool>,
         memory: Cache<K, V, S, HybridCacheProperties>,
-        storage: Store<K, V, S, HybridCacheProperties>,
+        storage: Store<K, V, S, HybridCacheProperties, E>,
         flush_on_close: bool,
     ) -> Result<()> {
         if closed.fetch_or(true, Ordering::Relaxed) {
@@ -344,11 +350,12 @@ where
     }
 }
 
-impl<K, V, S> Drop for Inner<K, V, S>
+impl<K, V, S, E> Drop for Inner<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     fn drop(&mut self) {
         let name = self.name.clone();
@@ -378,20 +385,22 @@ where
 /// ```
 ///
 /// So, `storage` must not hold the reference of `memory`.
-pub struct HybridCache<K, V, S = DefaultHasher>
+pub struct HybridCache<K, V, S = DefaultHasher, E = BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    inner: Arc<Inner<K, V, S>>,
+    inner: Arc<Inner<K, V, S, E>>,
 }
 
-impl<K, V, S> Debug for HybridCache<K, V, S>
+impl<K, V, S, E> Debug for HybridCache<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut r = f.debug_struct("HybridCache");
@@ -406,11 +415,12 @@ where
     }
 }
 
-impl<K, V, S> Clone for HybridCache<K, V, S>
+impl<K, V, S, E> Clone for HybridCache<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -419,7 +429,7 @@ where
     }
 }
 
-impl<K, V> HybridCache<K, V, DefaultHasher>
+impl<K, V> HybridCache<K, V, DefaultHasher, BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
@@ -430,17 +440,18 @@ where
     }
 }
 
-impl<K, V, S> HybridCache<K, V, S>
+impl<K, V, S, E> HybridCache<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     pub(crate) fn new(
         name: Cow<'static, str>,
         options: HybridCacheOptions,
         memory: Cache<K, V, S, HybridCacheProperties>,
-        storage: Store<K, V, S, HybridCacheProperties>,
+        storage: Store<K, V, S, HybridCacheProperties, E>,
         metrics: Arc<Metrics>,
     ) -> Self {
         let policy = options.policy;
@@ -493,7 +504,7 @@ where
     }
 
     /// Access the disk cache.
-    pub fn storage(&self) -> &Store<K, V, S, HybridCacheProperties> {
+    pub fn storage(&self) -> &Store<K, V, S, HybridCacheProperties, E> {
         &self.inner.storage
     }
 
@@ -600,7 +611,7 @@ where
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
-        Q: Hash + Equivalent<K> + ?Sized,
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
     {
         self.inner.memory.contains(key) || self.inner.storage.may_contains(key)
     }
@@ -631,12 +642,12 @@ where
     }
 
     /// Create a new [`HybridCacheWriter`].
-    pub fn writer(&self, key: K) -> HybridCacheWriter<K, V, S> {
+    pub fn writer(&self, key: K) -> HybridCacheWriter<K, V, S, E> {
         HybridCacheWriter::new(self.clone(), key)
     }
 
     /// Create a new [`HybridCacheStorageWriter`].
-    pub fn storage_writer(&self, key: K) -> HybridCacheStorageWriter<K, V, S> {
+    pub fn storage_writer(&self, key: K) -> HybridCacheStorageWriter<K, V, S, E> {
         HybridCacheStorageWriter::new(self.clone(), key)
     }
 
@@ -651,11 +662,12 @@ where
     }
 }
 
-impl<K, V, S> HybridCache<K, V, S>
+impl<K, V, S, E> HybridCache<K, V, S, E>
 where
     K: StorageKey + Clone,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     /// Get cached entry with the given key from the hybrid cache.
     pub fn get<Q>(&self, key: &Q) -> HybridGet<K, V, S>
@@ -718,7 +730,7 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
-    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
+    pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S, E>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
         F: FnOnce() -> FU,
@@ -922,16 +934,17 @@ struct GetOrFetchCtx {
 /// Future for [`HybridCache::get_or_fetch`].
 #[must_use]
 #[pin_project]
-pub struct HybridGetOrFetch<K, V, S = DefaultHasher>
+pub struct HybridGetOrFetch<K, V, S = DefaultHasher, E = BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     #[pin]
     inner: GetOrFetch<K, V, S, HybridCacheProperties>,
     policy: HybridCachePolicy,
-    store: Store<K, V, S, HybridCacheProperties>,
+    store: Store<K, V, S, HybridCacheProperties, E>,
     ctx: Arc<GetOrFetchCtx>,
     metrics: Arc<Metrics>,
     start: Instant,
@@ -941,22 +954,24 @@ where
     span_cancel_threshold: Duration,
 }
 
-impl<K, V, S> Debug for HybridGetOrFetch<K, V, S>
+impl<K, V, S, E> Debug for HybridGetOrFetch<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HybridGetOrFetch").field("inner", &self.inner).finish()
     }
 }
 
-impl<K, V, S> Future for HybridGetOrFetch<K, V, S>
+impl<K, V, S, E> Future for HybridGetOrFetch<K, V, S, E>
 where
     K: StorageKey + Clone,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     type Output = Result<HybridCacheEntry<K, V, S>>;
 
@@ -1006,11 +1021,12 @@ where
     }
 }
 
-impl<K, V, S> HybridGetOrFetch<K, V, S>
+impl<K, V, S, E> HybridGetOrFetch<K, V, S, E>
 where
     K: StorageKey + Clone,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
     /// Check if the future need to be awaited or can be unwrap at once.
     pub fn need_await(&self) -> bool {
@@ -1051,7 +1067,9 @@ mod tests {
     const KB: usize = 1024;
     const MB: usize = 1024 * 1024;
 
-    async fn open(dir: impl AsRef<Path>) -> HybridCache<u64, Vec<u8>, ModHasher> {
+    async fn open(
+        dir: impl AsRef<Path>,
+    ) -> HybridCache<u64, Vec<u8>, ModHasher, BlockEngine<u64, Vec<u8>, HybridCacheProperties>> {
         open_with(dir, |b| b, |b| b).await
     }
 
@@ -1061,7 +1079,7 @@ mod tests {
         block_engine_builder_mapper: impl FnOnce(
             BlockEngineConfig<u64, Vec<u8>, HybridCacheProperties>,
         ) -> BlockEngineConfig<u64, Vec<u8>, HybridCacheProperties>,
-    ) -> HybridCache<u64, Vec<u8>, ModHasher> {
+    ) -> HybridCache<u64, Vec<u8>, ModHasher, BlockEngine<u64, Vec<u8>, HybridCacheProperties>> {
         let mut block_engine_builder =
             BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
                 .with_block_size(MB);
@@ -1587,7 +1605,7 @@ mod tests {
 
         let e = TestError("expected unexpection".into());
 
-        let hybrid: HybridCache<u64, Vec<u8>> = HybridCacheBuilder::new()
+        let hybrid = HybridCacheBuilder::new()
             .with_name("test")
             .memory(100)
             .storage()
