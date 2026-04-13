@@ -93,6 +93,7 @@ where
     }
 }
 
+/// A reference to a piece in the keeper, removing it from the keeper on drop.
 pub struct PieceRef<K, V, P>
 where
     K: StorageKey,

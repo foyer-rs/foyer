@@ -21,28 +21,30 @@ use foyer_common::{
     code::{DefaultHasher, HashBuilder, StorageKey, StorageValue},
     properties::Properties,
 };
-use foyer_storage::StorageFilterResult;
+use foyer_storage::{Engine, StorageFilterResult};
 
 use crate::{HybridCache, HybridCacheEntry, HybridCacheProperties};
 
 /// Writer for hybrid cache to support more flexible write APIs.
-pub struct HybridCacheWriter<K, V, S = DefaultHasher>
+pub struct HybridCacheWriter<K, V, S = DefaultHasher, E = foyer_storage::BlockEngine<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    hybrid: HybridCache<K, V, S>,
+    hybrid: HybridCache<K, V, S, E>,
     key: K,
 }
 
-impl<K, V, S> HybridCacheWriter<K, V, S>
+impl<K, V, S, E> HybridCacheWriter<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    pub(crate) fn new(hybrid: HybridCache<K, V, S>, key: K) -> Self {
+    pub(crate) fn new(hybrid: HybridCache<K, V, S, E>, key: K) -> Self {
         Self { hybrid, key }
     }
 
@@ -57,19 +59,24 @@ where
     }
 
     /// Convert [`HybridCacheWriter`] to [`HybridCacheStorageWriter`].
-    pub fn storage(self) -> HybridCacheStorageWriter<K, V, S> {
+    pub fn storage(self) -> HybridCacheStorageWriter<K, V, S, E> {
         HybridCacheStorageWriter::new(self.hybrid, self.key)
     }
 }
 
 /// Writer for disk cache of a hybrid cache to support more flexible write APIs.
-pub struct HybridCacheStorageWriter<K, V, S = DefaultHasher>
-where
+pub struct HybridCacheStorageWriter<
+    K,
+    V,
+    S = DefaultHasher,
+    E = foyer_storage::BlockEngine<K, V, HybridCacheProperties>,
+> where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    hybrid: HybridCache<K, V, S>,
+    hybrid: HybridCache<K, V, S, E>,
     key: K,
     hash: u64,
 
@@ -78,13 +85,14 @@ where
     pick_duration: Duration,
 }
 
-impl<K, V, S> HybridCacheStorageWriter<K, V, S>
+impl<K, V, S, E> HybridCacheStorageWriter<K, V, S, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    E: Engine<K, V, HybridCacheProperties>,
 {
-    pub(crate) fn new(hybrid: HybridCache<K, V, S>, key: K) -> Self {
+    pub(crate) fn new(hybrid: HybridCache<K, V, S, E>, key: K) -> Self {
         let hash = hybrid.memory().hash(&key);
         Self {
             hybrid,
