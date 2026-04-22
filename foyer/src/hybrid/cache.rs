@@ -860,12 +860,20 @@ where
         let res = ready!(this.inner.poll_inner(cx));
 
         match res.as_ref() {
-            Ok(Some(_)) => {
-                this.metrics.hybrid_hit.increase(1);
-                this.metrics
-                    .hybrid_hit_duration
-                    .record(this.start.elapsed().as_secs_f64());
-            }
+            Ok(Some(entry)) => match entry.source() {
+                Source::Outer => {
+                    this.metrics.hybrid_miss.increase(1);
+                    this.metrics
+                        .hybrid_miss_duration
+                        .record(this.start.elapsed().as_secs_f64());
+                }
+                Source::Memory | Source::Disk => {
+                    this.metrics.hybrid_hit.increase(1);
+                    this.metrics
+                        .hybrid_hit_duration
+                        .record(this.start.elapsed().as_secs_f64());
+                }
+            },
             Ok(None) => {
                 this.metrics.hybrid_miss.increase(1);
                 this.metrics
@@ -1516,10 +1524,12 @@ mod tests {
         // Release fetch to proceed.
         barrier.wait().await;
         // Poll get first.
-        let r_get = get.await.unwrap();
+        let r_get = get.await.unwrap().unwrap();
         // Poll fetch later.
         let r_fetch = fetch.await.unwrap();
-        assert_eq!(r_get.unwrap().value(), r_fetch.value());
+        assert_eq!(r_get.value(), r_fetch.value());
+        assert_eq!(r_get.source(), Source::Outer);
+        assert_eq!(r_fetch.source(), Source::Outer);
     }
 
     #[test_log::test(tokio::test)]
