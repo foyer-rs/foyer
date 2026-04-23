@@ -91,6 +91,12 @@ pub struct Metrics {
     pub hybrid_throttled_duration: BoxedHistogram,
     pub hybrid_remove_duration: BoxedHistogram,
     pub hybrid_error_duration: BoxedHistogram,
+
+    pub hybrid_fetch_queue_duration: BoxedHistogram,
+    pub hybrid_inflight_lead_wait_duration: BoxedHistogram,
+    pub hybrid_inflight_waiter_wait_duration: BoxedHistogram,
+    pub hybrid_inflight_lead_notify_delay_duration: BoxedHistogram,
+    pub hybrid_inflight_waiter_notify_delay_duration: BoxedHistogram,
 }
 
 impl Debug for Metrics {
@@ -287,6 +293,13 @@ impl Metrics {
             "foyer hybrid cache operation durations".into(),
             &["name", "op"],
         );
+        let foyer_hybrid_inner_op_duration = registry.register_histogram_vec_with_buckets(
+            "foyer_hybrid_inner_op_duration".into(),
+            "foyer hybrid cache inner operation durations".into(),
+            &["name", "op"],
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
+        );
 
         let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]);
         let hybrid_hit = foyer_hybrid_op_total.counter(&[name.clone(), "hit".into()]);
@@ -301,6 +314,16 @@ impl Metrics {
         let hybrid_throttled_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "throttled".into()]);
         let hybrid_remove_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "remove".into()]);
         let hybrid_error_duration = foyer_hybrid_op_duration.histogram(&[name.clone(), "error".into()]);
+        let hybrid_fetch_queue_duration =
+            foyer_hybrid_inner_op_duration.histogram(&[name.clone(), "fetch_queue".into()]);
+        let hybrid_inflight_lead_wait_duration =
+            foyer_hybrid_inner_op_duration.histogram(&[name.clone(), "inflight_lead_wait".into()]);
+        let hybrid_inflight_waiter_wait_duration =
+            foyer_hybrid_inner_op_duration.histogram(&[name.clone(), "inflight_waiter_wait".into()]);
+        let hybrid_inflight_lead_notify_delay_duration =
+            foyer_hybrid_inner_op_duration.histogram(&[name.clone(), "inflight_lead_notify_delay".into()]);
+        let hybrid_inflight_waiter_notify_delay_duration =
+            foyer_hybrid_inner_op_duration.histogram(&[name.clone(), "inflight_waiter_notify_delay".into()]);
 
         Self {
             memory_insert,
@@ -362,6 +385,11 @@ impl Metrics {
             hybrid_miss_duration,
             hybrid_remove_duration,
             hybrid_error_duration,
+            hybrid_fetch_queue_duration,
+            hybrid_inflight_lead_wait_duration,
+            hybrid_inflight_waiter_wait_duration,
+            hybrid_inflight_lead_notify_delay_duration,
+            hybrid_inflight_waiter_notify_delay_duration,
         }
     }
 

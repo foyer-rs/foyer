@@ -20,6 +20,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 
 use equivalent::Equivalent;
@@ -50,9 +51,24 @@ pub type RequiredFetchBuilderErased<K, V, P> =
     Box<dyn FnOnce(&mut dyn Any) -> RequiredFetch<FetchTarget<K, V, P>> + Send + 'static>;
 
 /// A waiter for a fetch operation.
-pub type Waiter<T> = oneshot::Receiver<Result<T>>;
+pub type Waiter<T> = oneshot::Receiver<InflightResult<T>>;
 /// A notifier for a fetch operation.
-pub type Notifier<T> = oneshot::Sender<Result<T>>;
+pub type Notifier<T> = oneshot::Sender<InflightResult<T>>;
+
+#[derive(Debug)]
+pub struct InflightResult<T> {
+    pub result: Result<T>,
+    pub notified_at: Instant,
+}
+
+impl<T> InflightResult<T> {
+    pub fn from_result(result: Result<T>) -> Self {
+        Self {
+            result,
+            notified_at: Instant::now(),
+        }
+    }
+}
 
 fn erase_required_fetch_builder<K, V, P, C, F>(f: F) -> RequiredFetchBuilderErased<K, V, P>
 where

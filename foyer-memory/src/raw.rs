@@ -24,6 +24,7 @@ use std::{
         Arc,
     },
     task::{Context, Poll},
+    time::Instant,
 };
 
 use arc_swap::ArcSwap;
@@ -47,8 +48,8 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{sentry::Sentry, Indexer},
     inflight::{
-        Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
-        RequiredFetch, RequiredFetchBuilder, Waiter,
+        Enqueue, FetchOrTake, FetchTarget, InflightManager, InflightResult, Notifier, OptionalFetch,
+        OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::NoopPipe,
     record::{Data, Record},
@@ -588,11 +589,11 @@ where
 
         // Notify waiters out of the lock critical section.
         for notifier in notifiers {
-            let _ = notifier.send(Ok(Some(RawCacheEntry {
+            let _ = notifier.send(InflightResult::from_result(Ok(Some(RawCacheEntry {
                 record: record.clone(),
                 inner: self.inner.clone(),
                 source,
-            })));
+            }))));
         }
 
         // Deallocate data out of the lock critical section.
@@ -1012,11 +1013,23 @@ where
                         cache: self.clone(),
                         inflights: inflights.clone(),
                         close,
+                        metrics: self.inner.metrics.clone(),
+                        queued_at: Some(Instant::now()),
                     };
                     runtime.spawn(fetch);
-                    RawGetOrFetch::Miss(RawWait { waiter })
+                    RawGetOrFetch::Miss(RawWait {
+                        waiter,
+                        kind: InflightWaitKind::Lead,
+                        wait_started_at: Instant::now(),
+                        metrics: self.inner.metrics.clone(),
+                    })
                 }
-                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
+                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait {
+                    waiter,
+                    kind: InflightWaitKind::Waiter,
+                    wait_started_at: Instant::now(),
+                    metrics: self.inner.metrics.clone(),
+                }),
             })
         };
 
@@ -1046,6 +1059,12 @@ where
 {
     Hit(Option<RawCacheEntry<E, S, I>>),
     Miss(#[pin] RawWait<E, S, I>),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum InflightWaitKind {
+    Lead,
+    Waiter,
 }
 
 impl<E, S, I> Debug for RawGetOrFetch<E, S, I>
@@ -1190,6 +1209,9 @@ where
     I: Indexer<Eviction = E>,
 {
     waiter: Waiter<Option<RawCacheEntry<E, S, I>>>,
+    kind: InflightWaitKind,
+    wait_started_at: Instant,
+    metrics: Arc<Metrics>,
 }
 
 impl<E, S, I> Debug for RawWait<E, S, I>
@@ -1216,7 +1238,21 @@ where
         // TODO(MrCroxx): Switch to `Result::flatten` after MSRV is 1.89+
         // return waiter.poll_unpin(cx).map(|r| r.map_err(|e| e.into()).flatten());
         this.waiter.poll_unpin(cx).map(|r| match r {
-            Ok(r) => r,
+            Ok(r) => {
+                let (wait_duration, notify_delay_duration) = match this.kind {
+                    InflightWaitKind::Lead => (
+                        &this.metrics.hybrid_inflight_lead_wait_duration,
+                        &this.metrics.hybrid_inflight_lead_notify_delay_duration,
+                    ),
+                    InflightWaitKind::Waiter => (
+                        &this.metrics.hybrid_inflight_waiter_wait_duration,
+                        &this.metrics.hybrid_inflight_waiter_notify_delay_duration,
+                    ),
+                };
+                wait_duration.record(this.wait_started_at.elapsed().as_secs_f64());
+                notify_delay_duration.record(r.notified_at.elapsed().as_secs_f64());
+                r.result
+            }
             Err(e) => Err(Error::new(ErrorKind::ChannelClosed, "waiter channel closed").with_source(e)),
         })
     }
@@ -1237,6 +1273,8 @@ where
     cache: RawCache<E, S, I>,
     inflights: Arc<Mutex<InflightManager<E, S, I>>>,
     close: Arc<AtomicBool>,
+    metrics: Arc<Metrics>,
+    queued_at: Option<Instant>,
 }
 
 impl<E, S, I, C> Debug for RawFetch<E, S, I, C>
@@ -1265,6 +1303,11 @@ where
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().project();
+        if let Some(queued_at) = this.queued_at.take() {
+            this.metrics
+                .hybrid_fetch_queue_duration
+                .record(queued_at.elapsed().as_secs_f64());
+        }
         loop {
             match this.state {
                 RawFetchState::Init {
@@ -1422,12 +1465,12 @@ where
         match res {
             Ok(e) => {
                 for notifier in notifiers.drain(..) {
-                    let _ = notifier.send(Ok(e.clone()));
+                    let _ = notifier.send(InflightResult::from_result(Ok(e.clone())));
                 }
             }
             Err(e) => {
                 for notifier in notifiers.drain(..) {
-                    let _ = notifier.send(Err(e.clone()));
+                    let _ = notifier.send(InflightResult::from_result(Err(e.clone())));
                 }
             }
         }
@@ -1454,10 +1497,9 @@ where
             .take(*this.hash, this.key.as_ref().unwrap(), Some(*this.id))
         {
             for notifier in notifiers {
-                let _ =
-                    notifier
-                        .send(Err(Error::new(ErrorKind::TaskCancelled, "fetch task cancelled")
-                            .with_context("hash", *this.hash)));
+                let _ = notifier.send(InflightResult::from_result(Err(
+                    Error::new(ErrorKind::TaskCancelled, "fetch task cancelled").with_context("hash", *this.hash),
+                )));
             }
         }
     }
