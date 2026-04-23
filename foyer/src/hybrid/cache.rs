@@ -732,7 +732,9 @@ where
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
-        let runtime = self.inner.storage.runtime().user();
+        // let runtime = self.inner.storage.runtime().user();
+        // TEST: test spawn from current tokio runtime
+        let runtime = tokio::runtime::Handle::current().into();
         let fut = fetch();
         let inner = self.inner.memory.get_or_fetch_inner(
             key,
@@ -791,7 +793,7 @@ where
                 }))
             },
             ctx.clone(),
-            runtime,
+            &runtime,
         );
 
         let policy = self.inner.policy;
