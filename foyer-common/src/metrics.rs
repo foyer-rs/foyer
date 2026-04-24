@@ -147,8 +147,8 @@ impl Metrics {
             "foyer_storage_op_duration".into(),
             "foyer disk cache op durations".into(),
             &["name", "op"],
-            // 1us ~ 4s
-            Buckets::exponential(0.000_001, 2.0, 23),
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
 
         let foyer_storage_inner_op_total = registry.register_counter_vec(
@@ -178,8 +178,8 @@ impl Metrics {
             "foyer_storage_disk_io_duration".into(),
             "foyer disk cache disk io duration".into(),
             &["name", "op"],
-            // 1us ~ 4s
-            Buckets::exponential(0.000_001, 2.0, 23),
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
 
         let foyer_storage_block_engine_block = registry.register_gauge_vec(
@@ -288,10 +288,12 @@ impl Metrics {
             "foyer hybrid cache operations".into(),
             &["name", "op"],
         );
-        let foyer_hybrid_op_duration = registry.register_histogram_vec(
+        let foyer_hybrid_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_hybrid_op_duration".into(),
             "foyer hybrid cache operation durations".into(),
             &["name", "op"],
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
         let foyer_hybrid_inner_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_hybrid_inner_op_duration".into(),
