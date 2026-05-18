@@ -87,6 +87,9 @@ tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
 tokio = { package = "foyer-tokio", version = "0.23.0-dev", path = "foyer-tokio", default-features = false }
+# tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
+# Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
+tonic = { version = ">=0.14, <0.14.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 twox-hash = { version = "2.1.2", default-features = false }
