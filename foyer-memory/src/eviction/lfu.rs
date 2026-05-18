@@ -164,6 +164,10 @@ where
             self.frequencies.halve();
         }
     }
+
+    fn estimate_frequency(frequencies: &CountMinSketch<u16>, hash: u64) -> u16 {
+        frequencies.estimate(CountMinKey(hash))
+    }
 }
 
 impl<K, V, P> Eviction for Lfu<K, V, P>
@@ -300,7 +304,7 @@ where
 
     fn pop(&mut self) -> Option<Arc<Record<Self>>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
-        // If both `window` and `probation` are empty, try to evict from `protected`.
+        // If both `window` and `probation` are empty, try evict from `protected`.
         let mut cw = self.window.front_mut();
         let mut cp = self.probation.front_mut();
         let record = match (cw.get(), cp.get()) {
@@ -308,7 +312,9 @@ where
             (None, Some(_)) => cp.remove(),
             (Some(_), None) => cw.remove(),
             (Some(w), Some(p)) => {
-                if self.frequencies.estimate(CountMinKey(w.hash())) < self.frequencies.estimate(CountMinKey(p.hash())) {
+                if Self::estimate_frequency(&self.frequencies, w.hash())
+                    < Self::estimate_frequency(&self.frequencies, p.hash())
+                {
                     cw.remove()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
