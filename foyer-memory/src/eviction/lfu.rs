@@ -85,6 +85,14 @@ pub struct LfuState {
     queue: Queue,
 }
 
+struct CountMinKey(u64);
+
+impl Hash for CountMinKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.0);
+    }
+}
+
 intrusive_adapter! { Adapter<K, V, P> = Arc<Record<Lfu<K, V, P>>>: Record<Lfu<K, V, P>> { ?offset = Record::<Lfu<K, V, P>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
 
 /// This implementation is inspired by [Caffeine](https://github.com/ben-manes/caffeine) under Apache License 2.0
@@ -149,14 +157,7 @@ where
     }
 
     fn update_frequencies(&mut self, hash: u64) {
-        struct IdentityHash(u64);
-        impl Hash for IdentityHash {
-            fn hash<H: Hasher>(&self, state: &mut H) {
-                state.write_u64(self.0);
-            }
-        }
-
-        self.frequencies.update(IdentityHash(hash));
+        self.frequencies.update(CountMinKey(hash));
         self.step += 1;
         if self.step >= self.decay {
             self.step >>= 1;
@@ -299,7 +300,7 @@ where
 
     fn pop(&mut self) -> Option<Arc<Record<Self>>> {
         // Compare the frequency of the front element of `window` and `probation` queue, and evict the lower one.
-        // If both `window` and `probation` are empty, try evict from `protected`.
+        // If both `window` and `probation` are empty, try to evict from `protected`.
         let mut cw = self.window.front_mut();
         let mut cp = self.probation.front_mut();
         let record = match (cw.get(), cp.get()) {
@@ -307,7 +308,7 @@ where
             (None, Some(_)) => cp.remove(),
             (Some(_), None) => cw.remove(),
             (Some(w), Some(p)) => {
-                if self.frequencies.estimate(w.hash()) < self.frequencies.estimate(p.hash()) {
+                if self.frequencies.estimate(CountMinKey(w.hash())) < self.frequencies.estimate(CountMinKey(p.hash())) {
                     cw.remove()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
@@ -627,8 +628,8 @@ mod tests {
 
         // evict 11, 12 because freq(11) < freq(0), freq(12) < freq(0)
         // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
-        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(11));
-        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(12));
+        assert!(TestLfu::estimate_frequency(&lfu.frequencies, 0) > TestLfu::estimate_frequency(&lfu.frequencies, 11));
+        assert!(TestLfu::estimate_frequency(&lfu.frequencies, 0) > TestLfu::estimate_frequency(&lfu.frequencies, 12));
         let r11 = lfu.pop().unwrap();
         let r12 = lfu.pop().unwrap();
         assert_ptr_eq(&rs[11], &r11);
