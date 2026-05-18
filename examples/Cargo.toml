@@ -21,6 +21,7 @@ ot = [
   "opentelemetry",
   "opentelemetry-otlp",
   "opentelemetry_sdk",
+  "tonic",
 ]
 
 [dependencies]
@@ -52,7 +53,14 @@ prometheus = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
+
+# `tonic` is not used directly in example code, but it must be listed as a dep so the `ot` feature
+# can opt into the tonic-backed gRPC transport for `opentelemetry-otlp` (`grpc-tonic`).
+# Tell cargo-machete to ignore it so CI doesn't flag it as unused.
+[package.metadata.cargo-machete]
+ignored = ["tonic"]
 
 [[example]]
 name = "memory"
