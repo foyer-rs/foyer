@@ -23,7 +23,7 @@ tracing = ["dep:fastrace", "foyer-common/tracing"]
 [dependencies]
 anyhow = { workspace = true }
 bitflags = { workspace = true }
-cmsketch = { workspace = true }
+datasketches = { workspace = true, features = ["countmin"] }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
@@ -47,6 +47,7 @@ moka = { workspace = true, features = ["sync"] }
 rand = { workspace = true, features = ["thread_rng"] }
 rand_distr = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
+tokio = { workspace = true, features = ["macros", "time"] }
 
 [[bench]]
 name = "bench_hit_ratio"

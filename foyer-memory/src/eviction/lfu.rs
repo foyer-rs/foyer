@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{mem::offset_of, sync::Arc};
+use std::{
+    hash::{Hash, Hasher},
+    mem::offset_of,
+    sync::Arc,
+};
 
-use cmsketch::CMSketchU16;
+use datasketches::countmin::CountMinSketch;
 use foyer_common::{
     code::{Key, Value},
     error::{Error, ErrorKind, Result},
@@ -45,12 +49,12 @@ pub struct LfuConfig {
 
     /// Error of the count-min sketch.
     ///
-    /// See [`CMSketchU16::new`].
+    /// See [`CountMinSketch::suggest_num_buckets`].
     pub cmsketch_eps: f64,
 
     /// Confidence of the count-min sketch.
     ///
-    /// See [`CMSketchU16::new`].
+    /// See [`CountMinSketch::suggest_num_hashes`].
     pub cmsketch_confidence: f64,
 }
 
@@ -79,6 +83,14 @@ enum Queue {
 pub struct LfuState {
     link: LinkedListAtomicLink,
     queue: Queue,
+}
+
+struct CountMinKey(u64);
+
+impl Hash for CountMinKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        state.write_u64(self.0);
+    }
 }
 
 intrusive_adapter! { Adapter<K, V, P> = Arc<Record<Lfu<K, V, P>>>: Record<Lfu<K, V, P>> { ?offset = Record::<Lfu<K, V, P>>::STATE_OFFSET + offset_of!(LfuState, link) => LinkedListAtomicLink } where K: Key, V: Value, P: Properties }
@@ -112,8 +124,7 @@ where
     window_weight_capacity: usize,
     protected_weight_capacity: usize,
 
-    // TODO(MrCroxx): use a count-min-sketch impl with atomic u16
-    frequencies: CMSketchU16,
+    frequencies: CountMinSketch<u16>,
 
     step: usize,
     decay: usize,
@@ -146,12 +157,16 @@ where
     }
 
     fn update_frequencies(&mut self, hash: u64) {
-        self.frequencies.inc(hash);
+        self.frequencies.update(CountMinKey(hash));
         self.step += 1;
         if self.step >= self.decay {
             self.step >>= 1;
             self.frequencies.halve();
         }
+    }
+
+    fn estimate_frequency(frequencies: &CountMinSketch<u16>, hash: u64) -> u16 {
+        frequencies.estimate(CountMinKey(hash))
     }
 }
 
@@ -193,8 +208,11 @@ where
 
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
-        let frequencies = CMSketchU16::new(config.cmsketch_eps, config.cmsketch_confidence);
-        let decay = frequencies.width();
+
+        let num_hashes = CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence);
+        let num_buckets = CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps);
+        let frequencies = CountMinSketch::<u16>::new(num_hashes, num_buckets);
+        let decay = num_buckets as usize;
 
         Self {
             window: LinkedList::new(Adapter::new()),
@@ -294,7 +312,9 @@ where
             (None, Some(_)) => cp.remove(),
             (Some(_), None) => cw.remove(),
             (Some(w), Some(p)) => {
-                if self.frequencies.estimate(w.hash()) < self.frequencies.estimate(p.hash()) {
+                if Self::estimate_frequency(&self.frequencies, w.hash())
+                    < Self::estimate_frequency(&self.frequencies, p.hash())
+                {
                     cw.remove()
 
                     // TODO(MrCroxx): Rotate probation to prevent a high frequency but cold head holds back promotion
@@ -614,8 +634,8 @@ mod tests {
 
         // evict 11, 12 because freq(11) < freq(0), freq(12) < freq(0)
         // [12] [0, 9, 10] [3, 4, 1, 2, 7, 8]
-        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(11));
-        assert!(lfu.frequencies.estimate(0) > lfu.frequencies.estimate(12));
+        assert!(TestLfu::estimate_frequency(&lfu.frequencies, 0) > TestLfu::estimate_frequency(&lfu.frequencies, 11));
+        assert!(TestLfu::estimate_frequency(&lfu.frequencies, 0) > TestLfu::estimate_frequency(&lfu.frequencies, 12));
         let r11 = lfu.pop().unwrap();
         let r12 = lfu.pop().unwrap();
         assert_ptr_eq(&rs[11], &r11);

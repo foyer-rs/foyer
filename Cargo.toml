@@ -32,12 +32,12 @@ bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 cfg-if = "1"
 clap = { version = "4", features = ["derive"] }
-cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.5"
 core_affinity = "0.8"
 criterion = "0.8.2"
 csv = "1"
+datasketches = { version = "0.3.0", default-features = false }
 equivalent = "1"
 fastant = "0.1.11"
 fastrace = "0.7"
