@@ -199,7 +199,7 @@ impl IoEngineConfig for UringIoEngineConfig {
                 })
                 .unzip();
 
-            for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs.into_iter()).enumerate() {
+            for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs).enumerate() {
                 let mut builder = IoUring::builder();
                 if self.iopoll {
                     builder.setup_iopoll();
