@@ -741,18 +741,9 @@ where
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        let hash = self.inner.hash_builder.hash_one(key);
-
-        match E::acquire() {
-            Op::Noop => self.inner.shards[self.shard(hash)].read().get_noop(hash, key),
-            Op::Immutable(_) => self.inner.shards[self.shard(hash)]
-                .read()
-                .with(|shard| shard.get_immutable(hash, key)),
-            Op::Mutable(_) => self.inner.shards[self.shard(hash)]
-                .write()
-                .with(|mut shard| shard.get_mutable(hash, key)),
-        }
-        .is_some()
+        // Reuse `get` so the refcount acquired by the lookup is released through
+        // `RawCacheEntry`'s Drop, instead of leaking on every hit.
+        self.get(key).is_some()
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::clear"))]
@@ -1737,6 +1728,75 @@ mod tests {
         }
 
         assert!(cache.get(&2).is_none());
+    }
+
+    fn test_touch_does_not_leak_refs<E>(cache: &RawCache<E, ModHasher, HashTableIndexer<E>>)
+    where
+        E: Eviction<Key = u64, Value = u64, Properties = TestProperties>,
+    {
+        cache.insert(1, 1);
+
+        // Establish baseline refs by acquiring and dropping a fresh entry.
+        let baseline = {
+            let entry = cache.get(&1).expect("entry should exist");
+            let r = entry.refs();
+            drop(entry);
+            r
+        };
+
+        // `contains` must not change refs.
+        for _ in 0..3 {
+            assert!(cache.contains(&1));
+            let entry = cache.get(&1).expect("entry should exist");
+            assert_eq!(entry.refs(), baseline, "contains must not change refs");
+            drop(entry);
+        }
+
+        // `get` followed by drop must not change refs across iterations.
+        for _ in 0..3 {
+            let entry = cache.get(&1).expect("entry should exist");
+            assert_eq!(entry.refs(), baseline, "get must not leak refs across calls");
+            drop(entry);
+        }
+
+        // The bug: `touch` was calling `get_*` which incremented refs, but never
+        // released them. Each call leaked one ref, so refs grew monotonically.
+        for _ in 0..5 {
+            assert!(cache.touch(&1));
+            let entry = cache.get(&1).expect("entry should exist");
+            assert_eq!(entry.refs(), baseline, "touch must not leak refs");
+            drop(entry);
+        }
+    }
+
+    #[test]
+    fn test_fifo_cache_touch_does_not_leak_refs() {
+        let cache = fifo_cache_for_test();
+        test_touch_does_not_leak_refs(&cache);
+    }
+
+    #[test]
+    fn test_s3fifo_cache_touch_does_not_leak_refs() {
+        let cache = s3fifo_cache_for_test();
+        test_touch_does_not_leak_refs(&cache);
+    }
+
+    #[test]
+    fn test_lru_cache_touch_does_not_leak_refs() {
+        let cache = lru_cache_for_test();
+        test_touch_does_not_leak_refs(&cache);
+    }
+
+    #[test]
+    fn test_lfu_cache_touch_does_not_leak_refs() {
+        let cache = lfu_cache_for_test();
+        test_touch_does_not_leak_refs(&cache);
+    }
+
+    #[test]
+    fn test_sieve_cache_touch_does_not_leak_refs() {
+        let cache = sieve_cache_for_test();
+        test_touch_does_not_leak_refs(&cache);
     }
 
     fn test_resize<E>(cache: &RawCache<E, ModHasher, HashTableIndexer<E>>)
