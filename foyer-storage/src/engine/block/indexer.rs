@@ -17,6 +17,7 @@ use std::{
     sync::Arc,
 };
 
+use foyer_common::hasher::ModHasher;
 use itertools::Itertools;
 use parking_lot::RwLock;
 
@@ -52,7 +53,7 @@ pub struct EntryAddress {
     pub sequence: Sequence,
 }
 
-type IndexerShard = HashMap<u64, Index>;
+type IndexerShard = HashMap<u64, Index, ModHasher>;
 
 /// [`Indexer`] records key hash to entry address on fs.
 #[derive(Debug, Clone)]
@@ -62,7 +63,9 @@ pub struct Indexer {
 
 impl Indexer {
     pub fn new(shards: usize) -> Self {
-        let shards = (0..shards).map(|_| RwLock::new(HashMap::new())).collect_vec();
+        let shards = (0..shards)
+            .map(|_| RwLock::new(HashMap::with_hasher(ModHasher::default())))
+            .collect_vec();
         Self {
             shards: Arc::new(shards),
         }
@@ -83,12 +86,27 @@ impl Indexer {
         fastrace::trace(name = "foyer::storage::block::indexer::insert_batch")
     )]
     pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
-        let shards: HashMap<usize, Vec<HashedEntryAddress>> =
-            batch.into_iter().into_group_map_by(|haddr| self.shard(haddr.hash));
+        let mut counts = vec![0; self.shards.len()];
+        for haddr in &batch {
+            counts[self.shard(haddr.hash)] += 1;
+        }
+
+        let mut shards = counts.iter().map(|count| Vec::with_capacity(*count)).collect_vec();
+        for haddr in batch {
+            let shard = self.shard(haddr.hash);
+            shards[shard].push(haddr);
+        }
 
         let mut olds = vec![];
-        for (s, batch) in shards {
+        for (s, batch) in shards.into_iter().enumerate() {
+            if batch.is_empty() {
+                continue;
+            }
             let mut shard = self.shards[s].write();
+            let available = shard.capacity().saturating_sub(shard.len());
+            if available < batch.len() {
+                shard.reserve(batch.len() - available);
+            }
             for haddr in batch {
                 if let Some(old) = self.insert_inner(&mut shard, haddr.hash, Index::Address(haddr.address)) {
                     olds.push(HashedEntryAddress {
