@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::{
-    collections::{HashMap, hash_map::Entry},
     fmt::Debug,
     sync::{Arc, atomic::Ordering},
     time::Instant,
@@ -27,14 +26,14 @@ use foyer_common::{
 use futures_util::{StreamExt, TryStreamExt, stream};
 use itertools::Itertools;
 
-use super::indexer::{EntryAddress, Indexer};
+use super::indexer::Indexer;
 use crate::engine::{
     RecoverMode,
     block::{
         indexer::HashedEntryAddress,
         manager::{Block, BlockId, BlockManager},
         scanner::{BlockScanner, EntryInfo},
-        serde::{AtomicSequence, Sequence},
+        serde::AtomicSequence,
         tombstone::Tombstone,
     },
 };
@@ -79,31 +78,13 @@ impl RecoverRunner {
             return Err(e);
         }
 
-        #[derive(Debug)]
-        enum EntryAddressOrTombstone {
-            EntryAddress(EntryAddress),
-            Tombstone,
-        }
-
-        // Dedup entries.
+        // Install recovered entries into the indexer. The indexer deduplicates by sequence, so recovery does not need
+        // an extra global dedup table.
         let mut latest_sequence = 0;
-        let mut indices: HashMap<u64, (Sequence, EntryAddressOrTombstone)> = HashMap::new();
         let mut clean_blocks = vec![];
         let mut evictable_blocks = vec![];
+        let mut total_entries = 0;
 
-        let mut insert_or_update =
-            |hash: u64, sequence: Sequence, addr: EntryAddressOrTombstone| match indices.entry(hash) {
-                Entry::Occupied(mut entry) => {
-                    let (latest, latest_addr) = entry.get_mut();
-                    if sequence >= *latest {
-                        *latest = sequence;
-                        *latest_addr = addr;
-                    }
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert((sequence, addr));
-                }
-            };
         for (block, infos) in total.into_iter().map(|r| r.unwrap()).enumerate() {
             let block = block as BlockId;
 
@@ -113,37 +94,31 @@ impl RecoverRunner {
                 evictable_blocks.push(block);
             }
 
-            for EntryInfo { hash, addr } in infos {
-                latest_sequence = latest_sequence.max(addr.sequence);
-                insert_or_update(hash, addr.sequence, EntryAddressOrTombstone::EntryAddress(addr));
-            }
+            let indices = infos
+                .into_iter()
+                .map(|EntryInfo { hash, addr }| {
+                    latest_sequence = latest_sequence.max(addr.sequence);
+                    HashedEntryAddress { hash, address: addr }
+                })
+                .collect_vec();
+            total_entries += indices.len();
+            indexer.insert_batch(indices);
         }
         tombstones.iter().for_each(|tombstone| {
             latest_sequence = latest_sequence.max(tombstone.sequence);
-            insert_or_update(tombstone.hash, tombstone.sequence, EntryAddressOrTombstone::Tombstone);
         });
-        let indices = indices
-            .into_iter()
-            .filter_map(|(hash, (sequence, addr))| {
-                tracing::trace!("[recover runner]: hash {hash} has version: {sequence:?} {addr:?}");
-                match addr {
-                    EntryAddressOrTombstone::Tombstone => None,
-                    EntryAddressOrTombstone::EntryAddress(address) => Some(HashedEntryAddress { hash, address }),
-                }
-            })
-            .collect_vec();
+        indexer.remove_batch(tombstones.iter().map(|tombstone| (tombstone.hash, tombstone.sequence)));
 
         // Log recovery.
         tracing::info!(
             "Recovers {e} blocks with data, {c} clean blocks, {t} total entries with max sequence as {s}..",
             e = evictable_blocks.len(),
             c = clean_blocks.len(),
-            t = indices.len(),
+            t = total_entries,
             s = latest_sequence,
         );
 
         // Update components.
-        indexer.insert_batch(indices);
         sequence.store(latest_sequence + 1, Ordering::Release);
         block_manager.init(&clean_blocks);
 
