@@ -13,7 +13,14 @@ readme.workspace = true
 exclude.workspace = true
 
 [package.metadata.docs.rs]
-features = ["serde", "tracing", "nightly", "deadlock", "strict_assertions"]
+features = [
+  "serde",
+  "tracing",
+  "nightly",
+  "deadlock",
+  "strict_assertions",
+  "io_uring",
+]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-udeps.ignore]
@@ -21,7 +28,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 development = ["jiff"]
 
 [features]
-default = ["runtime-tokio"]
+default = ["runtime-tokio", "io_uring"]
 clap = ["foyer-storage/clap"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
@@ -40,6 +47,10 @@ strict_assertions = [
 ]
 runtime-tokio = ["tokio/runtime-tokio"]
 runtime-madsim-tokio = ["tokio/runtime-madsim-tokio"]
+# Enable the io_uring based I/O engine. Linux only. Disable to build on
+# architectures where the `io-uring` crate has no prebuilt syscall bindings
+# (e.g. armv7).
+io_uring = ["foyer-storage/io_uring"]
 
 [dependencies]
 anyhow = { workspace = true }

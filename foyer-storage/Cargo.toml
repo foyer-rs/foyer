@@ -24,6 +24,11 @@ strict_assertions = [
   "foyer-common/strict_assertions",
   "foyer-memory/strict_assertions",
 ]
+# Enable the io_uring based I/O engine. Linux only.
+# This feature pulls in the `io-uring` crate, which ships prebuilt syscall
+# bindings only for a limited set of architectures. Disable this feature to
+# build foyer on architectures unsupported by `io-uring` (e.g. armv7).
+io_uring = ["dep:io-uring", "dep:core_affinity"]
 
 [dependencies]
 allocator-api2 = { workspace = true }
@@ -53,8 +58,8 @@ twox-hash = { workspace = true, features = ["xxhash32", "xxhash64"] }
 zstd = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-core_affinity = { workspace = true }
-io-uring = { workspace = true }
+core_affinity = { workspace = true, optional = true }
+io-uring = { workspace = true, optional = true }
 
 [dev-dependencies]
 bytesize = { workspace = true }
