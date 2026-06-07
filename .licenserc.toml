@@ -1,0 +1,7 @@
+headerPath = "Apache-2.0.txt"
+
+includes = ['**/*.rs']
+
+[properties]
+copyrightOwner = "foyer Project Authors"
+inceptionYear = 2026
