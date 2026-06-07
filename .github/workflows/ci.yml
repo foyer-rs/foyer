@@ -1,20 +1,18 @@
-name: "CI"
+name: CI
 
 on:
   push:
     branches:
-      - "main"
-      - "forks/*"
+      - main
       - release-*.*
   pull_request:
     branches:
-      - "main"
-      - "v*.*.*-rc"
+      - main
       - release-*.*
 
 concurrency:
-    group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
-    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -41,12 +39,13 @@ jobs:
           cargo x json --check
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
+
   cargo-manifest-check:
     name: cargo manifest check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Cache Cargo home
@@ -66,12 +65,13 @@ jobs:
       - name: Run taplo fmt check
         run: |
           taplo fmt --check
+
   rust-machete:
     name: rust machete check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -80,6 +80,7 @@ jobs:
           toolchain: stable
       - name: Run cargo machete
         uses: bnjbvr/cargo-machete@main
+
   rust-udeps:
     name: rust udeps test
     strategy:
@@ -89,7 +90,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -118,6 +119,7 @@ jobs:
           RUSTFLAGS: "--cfg tokio_unstable -Awarnings"
         run: |
           cargo udeps --all-targets
+
   rust-ffmt-check:
     name: rust ffmt check
     strategy:
@@ -127,7 +129,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -155,6 +157,7 @@ jobs:
           echo "It uses unstable features to achieve a better format."
           echo "If you want to pass the test, please install the nightly toolchain with \`rustup install nightly\`."
           echo "Then run \`make ffmt\`."
+
   rust-test:
     name: rust test with codecov
     strategy:
@@ -166,7 +169,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -242,6 +245,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           verbose: true
+
   foyer-bench-fuzzy-test:
     name: foyer bench fuzzy test with codecov
     strategy:
@@ -252,7 +256,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -370,6 +374,7 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           verbose: true
+
   rustdoc-test:
     name: rust doc test
     strategy:
@@ -379,7 +384,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -423,7 +428,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -502,12 +507,13 @@ jobs:
           rm -rf $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           mkdir -p $GITHUB_WORKSPACE/foyer-data/foyer-storage/deadlock
           timeout 2m ./target/debug/foyer-bench --dir $GITHUB_WORKSPACE/foyer-data/foyer-bench/deadlock --mem 16MiB --disk 256MiB --block-size 16MiB --get-range 1000 --w-rate 1MiB --r-rate 1MiB --disk-write-throughput 10MiB --entry-size-min 2KiB --entry-size-max 128KiB --time 60 --policy insertion --io-engine io_uring
+
   asan:
     name: run with address saniziter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
@@ -552,12 +558,13 @@ jobs:
         with:
           name: artifacts.asan.tgz
           path: artifacts.asan.tgz
+
   madsim:
     name: check build with madsim
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Install rust toolchain
