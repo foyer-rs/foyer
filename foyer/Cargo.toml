@@ -24,6 +24,7 @@ development = ["jiff"]
 default = ["runtime-tokio"]
 clap = ["foyer-storage/clap"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
+borsh = ["foyer-common/borsh"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
 tracing = [
   "dep:fastrace",

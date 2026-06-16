@@ -57,18 +57,18 @@ pub trait Code {
     ///
     /// NOTE:
     ///
-    /// When implementing [`Code`], if [`std::io::Error`] or `bincode::Error` occurs during encoding,
-    /// please use [`Error::io_error`] or `Error::bincode_error` to convert it into [`Error`],
-    /// instead of manually creating an [`Error`]..
+    /// When implementing [`Code`], if [`std::io::Error`] or a serialization error occurs during encoding,
+    /// please use [`Error::io_error`] or [`Error::postcard_error`] to convert it into [`Error`],
+    /// instead of manually creating an [`Error`].
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()>;
 
     /// Decode the object from a reader.
     ///
     /// NOTE:
     ///
-    /// When implementing [`Code`], if [`std::io::Error`] or `bincode::Error` occurs during decoding,
-    /// please use [`Error::io_error`] or `Error::bincode_error` to convert it into [`Error`],
-    /// instead of manually creating an [`Error`]..
+    /// When implementing [`Code`], if [`std::io::Error`] or a serialization error occurs during decoding,
+    /// please use [`Error::io_error`] or [`Error::postcard_error`] to convert it into [`Error`],
+    /// instead of manually creating an [`Error`].
     fn decode(reader: &mut impl std::io::Read) -> Result<Self>
     where
         Self: Sized;
@@ -79,28 +79,62 @@ pub trait Code {
     fn estimated_size(&self) -> usize;
 }
 
-#[cfg(feature = "serde")]
+/// Blanket implementation of [`Code`] for types implementing [`borsh::BorshSerialize`] and
+/// [`borsh::BorshDeserialize`].
+///
+/// This takes priority over the `serde`-based blanket implementation when both
+/// the `borsh` and `serde` features are enabled.
+#[cfg(feature = "borsh")]
+impl<T> Code for T
+where
+    T: borsh::BorshSerialize + borsh::BorshDeserialize,
+{
+    fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
+        borsh::to_writer(writer, self).map_err(Error::io_error)
+    }
+
+    fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
+        borsh::from_reader(reader).map_err(Error::io_error)
+    }
+
+    fn estimated_size(&self) -> usize {
+        borsh::object_length(self).unwrap_or(0)
+    }
+}
+
+/// Blanket implementation of [`Code`] for types implementing [`serde::Serialize`] and
+/// [`serde::de::DeserializeOwned`] via the [`postcard`] serialization format.
+///
+/// This blanket impl is only active when the `borsh` feature is NOT enabled.
+/// When `borsh` is enabled, its blanket impl takes priority to avoid trait coherence conflicts.
+#[cfg(all(feature = "serde", not(feature = "borsh")))]
 impl<T> Code for T
 where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
-        bincode::serialize_into(writer, self).map_err(Error::bincode_error)
+        postcard::to_io(self, writer)
+            .map(|_| ())
+            .map_err(Error::postcard_error)
     }
 
     fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
-        bincode::deserialize_from(reader).map_err(Error::bincode_error)
+        let mut buf = Vec::new();
+        reader
+            .read_to_end(&mut buf)
+            .map_err(Error::io_error)?;
+        postcard::from_bytes(&buf).map_err(Error::postcard_error)
     }
 
     fn estimated_size(&self) -> usize {
-        bincode::serialized_size(self).unwrap() as usize
+        postcard::experimental::serialized_size(self).unwrap_or(0)
     }
 }
 
 macro_rules! impl_serde_for_numeric_types {
     ($($t:ty),*) => {
         $(
-            #[cfg(not(feature = "serde"))]
+            #[cfg(not(any(feature = "serde", feature = "borsh")))]
             impl Code for $t {
                 fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
                     writer.write_all(&self.to_le_bytes()).map_err(Error::io_error)
@@ -128,7 +162,7 @@ macro_rules! for_all_numeric_types {
 
 for_all_numeric_types! { impl_serde_for_numeric_types }
 
-#[cfg(not(feature = "serde"))]
+#[cfg(not(any(feature = "serde", feature = "borsh")))]
 impl Code for bool {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         writer
@@ -154,7 +188,7 @@ impl Code for bool {
     }
 }
 
-#[cfg(not(feature = "serde"))]
+#[cfg(not(any(feature = "serde", feature = "borsh")))]
 impl Code for Vec<u8> {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
@@ -180,7 +214,7 @@ impl Code for Vec<u8> {
     }
 }
 
-#[cfg(not(feature = "serde"))]
+#[cfg(not(any(feature = "serde", feature = "borsh")))]
 impl Code for String {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
@@ -205,7 +239,7 @@ impl Code for String {
     }
 }
 
-#[cfg(not(feature = "serde"))]
+#[cfg(not(any(feature = "serde", feature = "borsh")))]
 impl Code for bytes::Bytes {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
         self.len().encode(writer)?;
@@ -233,20 +267,65 @@ impl Code for bytes::Bytes {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "serde")]
+    /// Tests for the `borsh` blanket impl.
+    #[cfg(feature = "borsh")]
+    mod borsh {
+        use super::*;
+
+        #[test]
+        fn test_borsh_encode_decode_numeric() {
+            // borsh uses io::Error, which maps WriteZero -> BufferSizeLimit
+            let mut buf = [0u8; 4];
+            let e = 1u64.encode(&mut buf.as_mut()).unwrap_err();
+            // A 4-byte buffer is too small for a u64; expect an IO-derived error.
+            assert!(
+                matches!(
+                    e.kind(),
+                    crate::error::ErrorKind::BufferSizeLimit | crate::error::ErrorKind::Io
+                ),
+                "unexpected error kind: {:?}",
+                e.kind()
+            );
+        }
+
+        #[test]
+        fn test_borsh_roundtrip() {
+            let original = 42u64;
+            let mut buf = vec![0xffu8; original.estimated_size()];
+            original.encode(&mut buf.as_mut_slice()).unwrap();
+            let decoded = u64::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(original, decoded);
+        }
+    }
+
+    /// Tests for the `postcard` (serde) blanket impl.
+    #[cfg(all(feature = "serde", not(feature = "borsh")))]
     mod serde {
         use super::*;
 
         #[test]
-        fn test_encode_overflow() {
-            let mut buf = [0u8; 4];
-            let e = 1u64.encode(&mut buf.as_mut()).unwrap_err();
-            assert_eq!(e.kind(), crate::error::ErrorKind::BufferSizeLimit);
+        fn test_postcard_encode_overflow() {
+            // postcard uses variable-length encoding; pick a value large enough
+            // that it definitely won't fit in a tiny buffer.
+            let mut buf = [0u8; 1];
+            let e = u64::MAX.encode(&mut buf.as_mut()).unwrap_err();
+            // postcard wraps IO errors from the writer as an External error.
+            assert!(matches!(e.kind(), crate::error::ErrorKind::External));
+        }
+
+        #[test]
+        fn test_postcard_roundtrip() {
+            let original = 42u64;
+            let mut buf = vec![0xffu8; original.estimated_size()];
+            original.encode(&mut buf.as_mut_slice()).unwrap();
+            let decoded = u64::decode(&mut buf.as_slice()).unwrap();
+            assert_eq!(original, decoded);
         }
     }
 
-    #[cfg(not(feature = "serde"))]
-    mod non_serde {
+    /// Tests for manual [`Code`] implementations (neither `serde` nor `borsh`).
+    #[cfg(not(any(feature = "serde", feature = "borsh")))]
+    mod manual {
         use super::*;
 
         #[test]

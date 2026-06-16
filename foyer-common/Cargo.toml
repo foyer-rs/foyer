@@ -18,19 +18,21 @@ development = ["criterion", "serde_bytes"]
 
 [features]
 default = ["tokio/runtime-tokio"]
-serde = ["dep:serde", "dep:bincode"]
+serde = ["dep:serde", "dep:postcard"]
+borsh = ["dep:borsh"]
 strict_assertions = []
 tracing = ["dep:fastrace"]
 
 [dependencies]
 anyhow = { workspace = true }
-bincode = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true, features = ["derive"] }
 bytes = { workspace = true }
 cfg-if = { workspace = true }
 fastrace = { workspace = true, optional = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
+postcard = { workspace = true, optional = true, features = ["use-std"] }
 serde = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt"] }
 twox-hash = { workspace = true, features = ["xxhash64"] }

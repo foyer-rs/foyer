@@ -15,6 +15,7 @@ publish = false
 
 [features]
 serde = ["foyer/serde"]
+borsh = ["foyer/borsh"]
 jaeger = ["fastrace-jaeger"]
 ot = [
   "fastrace-opentelemetry",
