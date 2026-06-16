@@ -16,7 +16,8 @@ use criterion::Criterion;
 
 use crate::{Entry, run_encode_decode_bench};
 
-/// Manual little-endian encoding: u64 (8 bytes LE) + label_len (u64 LE) + label bytes + payload_len (u64 LE) + payload bytes.
+/// Manual little-endian encoding: u64 (8 bytes LE) + label_len (u64 LE) + label bytes + payload_len (u64 LE) + payload
+/// bytes.
 fn manual_encode(entry: &Entry, buf: &mut Vec<u8>) {
     buf.extend_from_slice(&entry.id.to_le_bytes());
     buf.extend_from_slice(&(entry.label.len() as u64).to_le_bytes());
@@ -45,7 +46,5 @@ fn manual_decode(bytes: &[u8]) -> Entry {
 }
 
 pub fn bench(c: &mut Criterion) {
-    run_encode_decode_bench(c, "manual", manual_encode, manual_decode, |payload_size, label_len| {
-        Entry::create(payload_size, label_len)
-    });
+    run_encode_decode_bench(c, "manual", manual_encode, manual_decode, Entry::create);
 }

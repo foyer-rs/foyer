@@ -55,7 +55,5 @@ fn borsh_decode(bytes: &[u8]) -> Entry {
 }
 
 pub fn bench(c: &mut Criterion) {
-    run_encode_decode_bench(c, "borsh", borsh_encode, borsh_decode, |payload_size, label_len| {
-        Entry::create(payload_size, label_len)
-    });
+    run_encode_decode_bench(c, "borsh", borsh_encode, borsh_decode, Entry::create);
 }
