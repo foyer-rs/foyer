@@ -51,18 +51,18 @@ const M: usize = 1 << 20;
 
 /// Sizes to benchmark: (label, payload_size, label_len).
 const SIZES: &[(&str, usize, usize)] = &[
-    ("64B", 64, 8),
-    ("1K", 1 * K, 8),
-    ("64K", 64 * K, 8),
+    ("64KiB", 64 * K, 8),
+    ("4MiB", 4 * M, 8),
+    ("64MiB", 64 * M, 8),
 ];
 
 /// Helper: measure encode throughput for a given value.
-fn bench_encode<V>(b: &mut Bencher, encode: fn(&V, &mut Vec<u8>), v: V)
+fn bench_encode<V>(b: &mut Bencher, encode: fn(&V, &mut Vec<u8>), v: V, cap: usize)
 where
     V: Clone,
 {
     b.iter_custom(|iters| {
-        let mut buf = Vec::with_capacity(1 * M);
+        let mut buf = Vec::with_capacity(cap);
         let start = Instant::now();
         for _ in 0..iters {
             buf.clear();
@@ -78,8 +78,9 @@ fn bench_decode<V: Clone>(
     encode: fn(&V, &mut Vec<u8>),
     decode: fn(&[u8]) -> V,
     v: V,
+    cap: usize,
 ) {
-    let mut buf = Vec::with_capacity(1 * M);
+    let mut buf = Vec::with_capacity(cap);
     encode(&v, &mut buf);
     b.iter_custom(|iters| {
         let start = Instant::now();
@@ -109,8 +110,9 @@ pub fn run_encode_decode_bench<V: Clone + 'static>(
         let mut grp = c.benchmark_group(format!("{group}/encode"));
         for (label, size, label_len) in SIZES {
             let entry = create(*size, *label_len);
+            let cap = size + label_len + 4096;
             grp.bench_function(*label, |b| {
-                bench_encode(b, encode, entry.clone());
+                bench_encode(b, encode, entry.clone(), cap);
             });
         }
         grp.finish();
@@ -120,8 +122,9 @@ pub fn run_encode_decode_bench<V: Clone + 'static>(
         let mut grp = c.benchmark_group(format!("{group}/decode"));
         for (label, size, label_len) in SIZES {
             let entry = create(*size, *label_len);
+            let cap = size + label_len + 4096;
             grp.bench_function(*label, |b| {
-                bench_decode(b, encode, decode, entry.clone());
+                bench_decode(b, encode, decode, entry.clone(), cap);
             });
         }
         grp.finish();
