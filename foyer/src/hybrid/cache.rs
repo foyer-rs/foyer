@@ -1082,6 +1082,35 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_with_disk_cache() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let cache = HybridCacheBuilder::<u8, u8>::new()
+            .memory(1)
+            .storage()
+            .with_engine_config(BlockEngineConfig::new(
+                FsDeviceBuilder::new(dir).with_capacity(1).build().unwrap(),
+            ))
+            .build()
+            .await
+            .unwrap();
+
+        assert!(cache.is_hybrid());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_without_disk_cache() {
+        let cache = HybridCacheBuilder::<u8, u8>::new()
+            .memory(1)
+            .storage()
+            .build()
+            .await
+            .unwrap();
+
+        assert!(!cache.is_hybrid());
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
 
