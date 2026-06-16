@@ -354,14 +354,10 @@ impl Error {
         }
     }
 
-    /// Helper for creating an error from [`bincode::Error`].
-    #[cfg(feature = "serde")]
-    pub fn bincode_error(source: bincode::Error) -> Self {
-        match *source {
-            bincode::ErrorKind::SizeLimit => Error::new(ErrorKind::BufferSizeLimit, "coding error").with_source(source),
-            bincode::ErrorKind::Io(e) => Self::io_error(e),
-            _ => Error::new(ErrorKind::External, "coding error").with_source(source),
-        }
+    /// Helper for creating an error from [`postcard::Error`].
+    #[cfg(all(feature = "serde", not(feature = "borsh")))]
+    pub fn postcard_error(source: postcard::Error) -> Self {
+        Error::new(ErrorKind::External, "coding error").with_source(source)
     }
 
     /// Helper for creating a [`ErrorKind::NoSpace`] error with context.
@@ -379,13 +375,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
-#[cfg(feature = "serde")]
-impl From<bincode::Error> for Error {
-    fn from(e: bincode::Error) -> Self {
-        Self::bincode_error(e)
+#[cfg(all(feature = "serde", not(feature = "borsh")))]
+impl From<postcard::Error> for Error {
+    fn from(e: postcard::Error) -> Self {
+        Self::postcard_error(e)
     }
 }
-
 #[cfg(test)]
 mod tests {
 
