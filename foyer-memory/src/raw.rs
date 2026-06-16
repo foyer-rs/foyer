@@ -1786,6 +1786,71 @@ mod tests {
         test_resize(&cache);
     }
 
+    /// Test that a cache insert will interrupt get_or_fetch's underlying fetch if already in progress
+    #[tokio::test]
+    async fn test_insert_closes_inflight_fetch() {
+        use std::pin::pin;
+
+        use tokio::sync::Notify;
+
+        let cache = fifo_cache_for_test();
+        let key: u64 = 42;
+
+        let fetch_running = Arc::new(Notify::new());
+        let fetch_dropped = Arc::new(Notify::new());
+
+        // start a get_or_fetch with a fetch that yields forever and cannot resolve.
+        let get_or_fetch = cache.get_or_fetch(&key, {
+            let fetch_running = fetch_running.clone();
+            let fetch_dropped = fetch_dropped.clone();
+            move || {
+                async move {
+                    // notify fetch_dropped when this future is dropped.
+                    struct DropNotify(Arc<Notify>);
+                    impl Drop for DropNotify {
+                        fn drop(&mut self) {
+                            self.0.notify_one();
+                        }
+                    }
+                    let _guard = DropNotify(fetch_dropped);
+
+                    // signal that the fetch future is now executing.
+                    fetch_running.notify_one();
+
+                    // yield forever, this future can never resolve.
+                    loop {
+                        tokio::task::yield_now().await;
+                    }
+
+                    #[expect(unreachable_code)]
+                    Ok::<_, anyhow::Error>(42)
+                }
+            }
+        });
+
+        // start polling the get to trigger work
+        let cx = &mut std::task::Context::from_waker(std::task::Waker::noop());
+        let mut get_or_fetch = pin!(get_or_fetch);
+        assert!(get_or_fetch.as_mut().poll(cx).is_pending());
+
+        // wait until the spawned fetch has begun
+        fetch_running.notified().await;
+
+        // now insert the same key directly. this should short-circuit inflight fetches
+        cache.insert(key, 100);
+
+        // the get should now resolve
+        assert_eq!(*get_or_fetch.await.unwrap().unwrap().value(), 100);
+
+        // The fetch future is in a yield loop, so it will be re-polled by the runtime.
+        // Notification handling should short-circuit the fetch and drop it
+
+        // Await the drop notification with a timeout.
+        let drop_result = tokio::time::timeout(std::time::Duration::from_secs(1), fetch_dropped.notified()).await;
+
+        assert!(drop_result.is_ok(), "fetch future was not dropped within timeout");
+    }
+
     mod fuzzy {
         use foyer_common::properties::Hint;
 
