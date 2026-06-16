@@ -58,7 +58,7 @@ pub trait Code {
     /// NOTE:
     ///
     /// When implementing [`Code`], if [`std::io::Error`] or a serialization error occurs during encoding,
-    /// please use [`Error::io_error`] or [`Error::postcard_error`] to convert it into [`Error`],
+    /// please use [`Error::io_error`] or `Error::postcard_error` to convert it into [`Error`],
     /// instead of manually creating an [`Error`].
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()>;
 
@@ -67,7 +67,7 @@ pub trait Code {
     /// NOTE:
     ///
     /// When implementing [`Code`], if [`std::io::Error`] or a serialization error occurs during decoding,
-    /// please use [`Error::io_error`] or [`Error::postcard_error`] to convert it into [`Error`],
+    /// please use [`Error::io_error`] or `Error::postcard_error` to convert it into [`Error`],
     /// instead of manually creating an [`Error`].
     fn decode(reader: &mut impl std::io::Read) -> Result<Self>
     where
