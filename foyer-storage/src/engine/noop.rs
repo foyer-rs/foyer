@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, marker::PhantomData, sync::Arc};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData, sync::Arc};
 
+use equivalent::Equivalent;
 use foyer_common::{
     code::{StorageKey, StorageValue},
     error::Result,
@@ -28,6 +29,7 @@ use crate::{
     keeper::PieceRef,
 };
 
+/// Config for the noop disk cache engine that does nothing.
 pub struct NoopEngineConfig<K, V, P>(PhantomData<(K, V, P)>)
 where
     K: StorageKey,
@@ -62,6 +64,7 @@ where
     V: StorageValue,
     P: Properties,
 {
+    /// Build the noop engine.
     pub fn build(self) -> Arc<NoopEngine<K, V, P>> {
         let device = NoopDeviceBuilder::default().build().unwrap();
         let device: Arc<dyn Device> = device;
@@ -78,22 +81,14 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn build(self: Box<Self>, _: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>> {
-        async move { Ok((*self).build() as Arc<dyn Engine<K, V, P>>) }.boxed()
+    type Engine = NoopEngine<K, V, P>;
+
+    fn build(self: Box<Self>, _: EngineBuildContext) -> BoxFuture<'static, Result<Arc<NoopEngine<K, V, P>>>> {
+        async move { Ok((*self).build()) }.boxed()
     }
 }
 
-impl<K, V, P> From<NoopEngineConfig<K, V, P>> for Box<dyn EngineConfig<K, V, P>>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
-    fn from(builder: NoopEngineConfig<K, V, P>) -> Self {
-        builder.boxed()
-    }
-}
-
+/// Noop disk cache engine that does nothing.
 pub struct NoopEngine<K, V, P>
 where
     K: StorageKey,
@@ -121,6 +116,8 @@ where
     V: StorageValue,
     P: Properties,
 {
+    const IS_NOOP: bool = true;
+
     fn device(&self) -> &Arc<dyn Device> {
         &self.device
     }
@@ -131,25 +128,33 @@ where
 
     fn enqueue(&self, _: PieceRef<K, V, P>, _: usize) {}
 
-    fn load(&self, _: u64) -> BoxFuture<'static, Result<Load<K, V, P>>> {
-        async move { Ok(Load::Miss) }.boxed()
+    async fn load<'a, Q>(&'a self, _: u64, _: &'a Q) -> Result<Load<K, V, P>>
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
+        Ok(Load::Miss)
     }
 
-    fn delete(&self, _: u64) {}
+    fn delete<Q>(&self, _: u64, _: &Q)
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
+    }
 
-    fn may_contains(&self, _: u64) -> bool {
+    fn may_contains<Q>(&self, _: u64, _: &Q) -> bool
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
+    {
         false
     }
 
-    fn destroy(&self) -> BoxFuture<'static, Result<()>> {
-        async move { Ok(()) }.boxed()
+    async fn destroy(&self) -> Result<()> {
+        Ok(())
     }
 
-    fn wait(&self) -> BoxFuture<'static, ()> {
-        async move {}.boxed()
-    }
+    async fn wait(&self) {}
 
-    fn close(&self) -> BoxFuture<'static, Result<()>> {
-        async move { Ok(()) }.boxed()
+    async fn close(&self) -> Result<()> {
+        Ok(())
     }
 }

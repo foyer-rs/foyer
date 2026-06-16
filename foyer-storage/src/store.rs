@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    fmt::Debug,
-    hash::Hash,
-    sync::Arc,
-    time::Instant,
-};
+use std::{borrow::Cow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
 
 use equivalent::Equivalent;
 use foyer_common::{
@@ -36,10 +29,7 @@ use crate::test_utils::*;
 use crate::{
     StorageFilterResult,
     compress::Compression,
-    engine::{
-        Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
-        noop::{NoopEngine, NoopEngineConfig},
-    },
+    engine::{Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode, noop::NoopEngineConfig},
     io::{
         device::{Device, statistics::Statistics, throttle::Throttle},
         engine::{IoEngineBuildContext, IoEngineConfig, monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig},
@@ -49,27 +39,29 @@ use crate::{
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
-pub struct Store<K, V, S, P>
+pub struct Store<K, V, S, P, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    E: Engine<K, V, P>,
 {
-    inner: Arc<StoreInner<K, V, S, P>>,
+    inner: Arc<StoreInner<K, V, S, P, E>>,
 }
 
-struct StoreInner<K, V, S, P>
+struct StoreInner<K, V, S, P, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    E: Engine<K, V, P>,
 {
     hasher: Arc<S>,
 
     keeper: Keeper<K, V, P>,
-    engine: Arc<dyn Engine<K, V, P>>,
+    engine: Arc<E>,
 
     compression: Compression,
 
@@ -81,12 +73,13 @@ where
     load_throttle_switch: LoadThrottleSwitch,
 }
 
-impl<K, V, S, P> Debug for Store<K, V, S, P>
+impl<K, V, S, P, E> Debug for Store<K, V, S, P, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    E: Engine<K, V, P>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
@@ -98,12 +91,13 @@ where
     }
 }
 
-impl<K, V, S, P> Clone for Store<K, V, S, P>
+impl<K, V, S, P, E> Clone for Store<K, V, S, P, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    E: Engine<K, V, P>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -112,12 +106,13 @@ where
     }
 }
 
-impl<K, V, S, P> Store<K, V, S, P>
+impl<K, V, S, P, E> Store<K, V, S, P, E>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    E: Engine<K, V, P>,
 {
     /// Close the disk cache gracefully.
     ///
@@ -161,7 +156,7 @@ where
     /// Load a cache entry from the disk cache.
     pub async fn load<Q>(&self, key: &Q) -> Result<Load<K, V, P>>
     where
-        Q: Hash + Equivalent<K> + ?Sized,
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
     {
         let now = Instant::now();
 
@@ -185,39 +180,14 @@ where
             return Ok(Load::Throttled);
         }
 
-        match self.inner.engine.load(hash).await {
-            Ok(Load::Entry {
-                key: k,
-                value: v,
-                populated: p,
-            }) if key.equivalent(&k) => {
+        match self.inner.engine.load(hash, key).await {
+            Ok(load @ (Load::Entry { .. } | Load::Piece { .. })) => {
                 self.inner.metrics.storage_hit.increase(1);
                 self.inner
                     .metrics
                     .storage_hit_duration
                     .record(now.elapsed().as_secs_f64());
-                Ok(Load::Entry {
-                    key: k,
-                    value: v,
-                    populated: p,
-                })
-            }
-            Ok(Load::Piece { piece, populated }) if key.equivalent(piece.key()) => {
-                self.inner.metrics.storage_hit.increase(1);
-                self.inner
-                    .metrics
-                    .storage_hit_duration
-                    .record(now.elapsed().as_secs_f64());
-                Ok(Load::Piece { piece, populated })
-            }
-            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) => {
-                self.inner.metrics.storage_miss.increase(1);
-                self.inner.metrics.storage_false_positive.increase(1);
-                self.inner
-                    .metrics
-                    .storage_miss_duration
-                    .record(now.elapsed().as_secs_f64());
-                Ok(Load::Miss)
+                Ok(load)
             }
             Ok(Load::Miss) => {
                 self.inner.metrics.storage_miss.increase(1);
@@ -245,12 +215,12 @@ where
     /// Delete the cache entry with the given key from the disk cache.
     pub fn delete<'a, Q>(&'a self, key: &'a Q)
     where
-        Q: Hash + Equivalent<K> + ?Sized,
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
     {
         let now = Instant::now();
 
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.delete(hash);
+        self.inner.engine.delete(hash, key);
 
         self.inner.metrics.storage_delete.increase(1);
         self.inner
@@ -264,10 +234,10 @@ where
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn may_contains<Q>(&self, key: &Q) -> bool
     where
-        Q: Hash + Equivalent<K> + ?Sized,
+        Q: Hash + Equivalent<K> + Sync + ?Sized,
     {
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.may_contains(hash)
+        self.inner.engine.may_contains(hash, key)
     }
 
     /// Delete all cached entries of the disk cache.
@@ -313,24 +283,25 @@ where
 
     /// If the disk cache is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.inner.engine.type_id() != TypeId::of::<Arc<NoopEngine<K, V, P>>>()
+        !E::IS_NOOP
     }
 }
 
 /// The builder of the disk cache.
-pub struct StoreBuilder<K, V, S, P>
+pub struct StoreBuilder<K, V, S, P, EC = NoopEngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    EC: EngineConfig<K, V, P>,
 {
     name: Cow<'static, str>,
     memory: Cache<K, V, S, P>,
     metrics: Arc<Metrics>,
 
     io_engine_config: Option<Box<dyn IoEngineConfig>>,
-    engine_config: Option<Box<dyn EngineConfig<K, V, P>>>,
+    engine_config: EC,
 
     spawner: Option<Spawner>,
 
@@ -341,12 +312,13 @@ where
     load_throttle_switch: LoadThrottleSwitch,
 }
 
-impl<K, V, S, P> Debug for StoreBuilder<K, V, S, P>
+impl<K, V, S, P, EC> Debug for StoreBuilder<K, V, S, P, EC>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
     P: Properties,
+    EC: EngineConfig<K, V, P>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StoreBuilder")
@@ -362,7 +334,7 @@ where
     }
 }
 
-impl<K, V, S, P> StoreBuilder<K, V, S, P>
+impl<K, V, S, P> StoreBuilder<K, V, S, P, NoopEngineConfig<K, V, P>>
 where
     K: StorageKey,
     V: StorageValue,
@@ -377,7 +349,7 @@ where
             metrics,
 
             io_engine_config: None,
-            engine_config: None,
+            engine_config: NoopEngineConfig::default(),
 
             spawner: None,
 
@@ -387,7 +359,16 @@ where
             load_throttle_switch: LoadThrottleSwitch::default(),
         }
     }
+}
 
+impl<K, V, S, P, EC> StoreBuilder<K, V, S, P, EC>
+where
+    K: StorageKey,
+    V: StorageValue,
+    S: HashBuilder + Debug,
+    P: Properties,
+    EC: EngineConfig<K, V, P>,
+{
     /// Set io engine config for the disk cache store.
     ///
     /// Default: [`crate::io::engine::psync::PsyncIoEngineConfig`].
@@ -397,9 +378,19 @@ where
     }
 
     /// Set engine config for the disk cache store.
-    pub fn with_engine_config(mut self, config: impl Into<Box<dyn EngineConfig<K, V, P>>>) -> Self {
-        self.engine_config = Some(config.into());
-        self
+    pub fn with_engine_config<EC2: EngineConfig<K, V, P>>(self, config: EC2) -> StoreBuilder<K, V, S, P, EC2> {
+        StoreBuilder {
+            name: self.name,
+            memory: self.memory,
+            metrics: self.metrics,
+            io_engine_config: self.io_engine_config,
+            engine_config: config,
+            spawner: self.spawner,
+            compression: self.compression,
+            recover_mode: self.recover_mode,
+            #[cfg(any(test, feature = "test_utils"))]
+            load_throttle_switch: self.load_throttle_switch,
+        }
     }
 
     /// Set the compression algorithm of the disk cache store.
@@ -441,11 +432,11 @@ where
 
     #[doc(hidden)]
     pub fn is_noop(&self) -> bool {
-        self.engine_config.is_none()
+        EC::Engine::IS_NOOP
     }
 
     /// Build the disk cache store with the given configuration.
-    pub async fn build(self) -> Result<Store<K, V, S, P>> {
+    pub async fn build(self) -> Result<Store<K, V, S, P, EC::Engine>> {
         let memory = self.memory;
         let metrics = self.metrics;
 
@@ -469,18 +460,13 @@ where
             .await?;
         let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
 
-        let engine_builder = match self.engine_config {
-            Some(eb) => eb,
-            None => {
-                tracing::info!(
-                    "[store builder]: No engine builder is provided, run disk cache in mock mode that do nothing."
-                );
+        if EC::Engine::IS_NOOP {
+            tracing::info!(
+                "[store builder]: No-Op engine builder is provided, run disk cache in mock mode that do nothing."
+            );
+        }
 
-                Box::<NoopEngineConfig<K, V, P>>::default()
-            }
-        };
-
-        let engine = engine_builder
+        let engine = Box::new(self.engine_config)
             .build(EngineBuildContext {
                 io_engine,
                 metrics: metrics.clone(),

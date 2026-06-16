@@ -34,7 +34,13 @@ async fn test_store(
     memory: Cache<u64, Vec<u8>, ModHasher, TestProperties>,
     builder: impl Fn(
         &Cache<u64, Vec<u8>, ModHasher, TestProperties>,
-    ) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties>,
+    ) -> StoreBuilder<
+        u64,
+        Vec<u8>,
+        ModHasher,
+        TestProperties,
+        BlockEngineConfig<u64, Vec<u8>, TestProperties>,
+    >,
     recorder: Recorder,
 ) {
     let store = builder(&memory).build().await.unwrap();
@@ -105,7 +111,7 @@ fn basic(
     memory: &Cache<u64, Vec<u8>, ModHasher, TestProperties>,
     path: impl AsRef<Path>,
     recorder: &Recorder,
-) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties> {
+) -> StoreBuilder<u64, Vec<u8>, ModHasher, TestProperties, BlockEngineConfig<u64, Vec<u8>, TestProperties>> {
     // TODO(MrCroxx): Test mixed engine here.
     StoreBuilder::new("test", memory.clone(), Arc::new(Metrics::noop())).with_engine_config(
         BlockEngineConfig::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())

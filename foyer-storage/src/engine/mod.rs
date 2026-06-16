@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{any::Any, fmt::Debug, sync::Arc};
+use std::{any::Any, fmt::Debug, future::Future, hash::Hash, sync::Arc};
 
+use equivalent::Equivalent;
 use foyer_common::{
     code::{StorageKey, StorageValue},
     error::Result,
@@ -133,23 +134,17 @@ pub struct EngineBuildContext {
 }
 
 /// Disk cache engine config trait.
-#[expect(clippy::type_complexity)]
 pub trait EngineConfig<K, V, P>: Send + Sync + 'static + Debug
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    /// Build the engine with the given configurations.
-    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
+    /// The concrete engine type produced by this config.
+    type Engine: Engine<K, V, P>;
 
-    /// Box the config.
-    fn boxed(self) -> Box<Self>
-    where
-        Self: Sized,
-    {
-        Box::new(self)
-    }
+    /// Build the engine with the given configurations.
+    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<Self::Engine>>>;
 }
 
 /// Disk cache engine trait.
@@ -159,6 +154,9 @@ where
     V: StorageValue,
     P: Properties,
 {
+    /// Whether this is a noop (disabled) engine.
+    const IS_NOOP: bool = false;
+
     /// Get the device used by this disk cache engine.
     fn device(&self) -> &Arc<dyn Device>;
 
@@ -169,29 +167,32 @@ where
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.
-    ///
-    /// `load` may return a false-positive result on entry key hash collision. It's the caller's responsibility to
-    /// check if the returned key matches the given key.
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>>;
+    fn load<'a, Q>(&'a self, hash: u64, key: &'a Q) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'a
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized;
 
     /// Delete the cache entry with the given key from the disk cache.
-    fn delete(&self, hash: u64);
+    fn delete<Q>(&self, hash: u64, key: &Q)
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized;
 
     /// Check if the disk cache contains a cached entry with the given key.
     ///
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
-    fn may_contains(&self, hash: u64) -> bool;
+    fn may_contains<Q>(&self, hash: u64, key: &Q) -> bool
+    where
+        Q: Hash + Equivalent<K> + Sync + ?Sized;
 
     /// Delete all cached entries of the disk cache.
-    fn destroy(&self) -> BoxFuture<'static, Result<()>>;
+    fn destroy(&self) -> impl Future<Output = Result<()>> + Send + '_;
 
     /// Wait for the ongoing flush and reclaim tasks to finish.
-    fn wait(&self) -> BoxFuture<'static, ()>;
+    fn wait(&self) -> impl Future<Output = ()> + Send + '_;
 
     /// Close the disk cache gracefully.
     ///
     /// `close` will wait for all ongoing flush and reclaim tasks to finish.
-    fn close(&self) -> BoxFuture<'static, Result<()>>;
+    fn close(&self) -> impl Future<Output = Result<()>> + Send + '_;
 }
 
 pub mod block;
