@@ -37,7 +37,7 @@ use analyze::{Metrics, analyze, monitor};
 use bytesize::ByteSize;
 use clap::{ArgGroup, Parser, builder::PossibleValuesParser};
 use exporter::PrometheusExporter;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
 use foyer::UringIoEngineConfig;
 use foyer::{
     BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
@@ -592,7 +592,7 @@ async fn benchmark(args: Args) {
             }
             builder.boxed()
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "io_uring"))]
         "io_uring" => UringIoEngineConfig::new()
             .with_threads(args.io_uring_threads)
             .with_cpus(args.io_uring_cpus.clone())

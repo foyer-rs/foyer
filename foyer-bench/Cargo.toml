@@ -13,13 +13,14 @@ readme.workspace = true
 exclude.workspace = true
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "io_uring"]
 deadlock = ["parking_lot/deadlock_detection", "foyer/deadlock"]
 tokio-console = ["dep:console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
 tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
+io_uring = ["foyer/io_uring"]
 
 [dependencies]
 anyhow = { workspace = true }

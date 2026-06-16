@@ -14,7 +14,7 @@
 
 #[cfg(feature = "tracing")]
 pub use crate::common::tracing::TracingOptions;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
 pub use crate::storage::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
     common::{

@@ -16,7 +16,7 @@ pub mod monitor;
 pub mod noop;
 pub mod psync;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
 pub mod uring;
 
 use std::{
@@ -132,7 +132,7 @@ mod tests {
 
     use super::*;
     #[cfg(not(madsim))]
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "io_uring"))]
     use crate::io::engine::uring::UringIoEngineConfig;
     use crate::io::{
         bytes::IoSliceMut,
@@ -171,7 +171,7 @@ mod tests {
         let dir = tempdir().unwrap();
 
         #[cfg(not(madsim))]
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "io_uring"))]
         {
             let path = dir.path().join("test_file_1");
             let device = build_test_file_device(&path).unwrap();

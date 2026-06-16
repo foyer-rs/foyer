@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "io_uring"))]
 pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
     compress::Compression,
