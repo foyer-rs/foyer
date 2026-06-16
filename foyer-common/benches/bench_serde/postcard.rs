@@ -14,7 +14,7 @@
 
 use criterion::Criterion;
 
-use crate::{run_encode_decode_bench, Entry};
+use crate::{Entry, run_encode_decode_bench};
 
 fn postcard_encode(entry: &Entry, buf: &mut Vec<u8>) {
     postcard::to_io(entry, buf).unwrap();
@@ -26,7 +26,11 @@ fn postcard_decode(bytes: &[u8]) -> Entry {
 }
 
 pub fn bench(c: &mut Criterion) {
-    run_encode_decode_bench(c, "postcard", postcard_encode, postcard_decode, |payload_size, label_len| {
-        Entry::create(payload_size, label_len)
-    });
+    run_encode_decode_bench(
+        c,
+        "postcard",
+        postcard_encode,
+        postcard_decode,
+        |payload_size, label_len| Entry::create(payload_size, label_len),
+    );
 }

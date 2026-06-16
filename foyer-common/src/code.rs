@@ -113,16 +113,12 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
     fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
-        postcard::to_io(self, writer)
-            .map(|_| ())
-            .map_err(Error::postcard_error)
+        postcard::to_io(self, writer).map(|_| ()).map_err(Error::postcard_error)
     }
 
     fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
         let mut buf = Vec::new();
-        reader
-            .read_to_end(&mut buf)
-            .map_err(Error::io_error)?;
+        reader.read_to_end(&mut buf).map_err(Error::io_error)?;
         postcard::from_bytes(&buf).map_err(Error::postcard_error)
     }
 

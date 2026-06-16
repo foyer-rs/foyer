@@ -16,13 +16,13 @@
 
 use std::time::Instant;
 
-use criterion::{criterion_group, criterion_main, Bencher, Criterion};
+use criterion::{Bencher, Criterion, criterion_group, criterion_main};
 
-#[cfg(feature = "serde")]
-mod postcard;
 #[cfg(feature = "borsh")]
 mod borsh;
 mod manual;
+#[cfg(feature = "serde")]
+mod postcard;
 
 /// A representative cache entry: an id, a label, and a payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,11 +50,7 @@ const K: usize = 1 << 10;
 const M: usize = 1 << 20;
 
 /// Sizes to benchmark: (label, payload_size, label_len).
-const SIZES: &[(&str, usize, usize)] = &[
-    ("64KiB", 64 * K, 8),
-    ("4MiB", 4 * M, 8),
-    ("64MiB", 64 * M, 8),
-];
+const SIZES: &[(&str, usize, usize)] = &[("64KiB", 64 * K, 8), ("4MiB", 4 * M, 8), ("64MiB", 64 * M, 8)];
 
 /// Helper: measure encode throughput for a given value.
 fn bench_encode<V>(b: &mut Bencher, encode: fn(&V, &mut Vec<u8>), v: V, cap: usize)
@@ -73,13 +69,7 @@ where
 }
 
 /// Helper: measure decode throughput for a given encoded buffer.
-fn bench_decode<V: Clone>(
-    b: &mut Bencher,
-    encode: fn(&V, &mut Vec<u8>),
-    decode: fn(&[u8]) -> V,
-    v: V,
-    cap: usize,
-) {
+fn bench_decode<V: Clone>(b: &mut Bencher, encode: fn(&V, &mut Vec<u8>), decode: fn(&[u8]) -> V, v: V, cap: usize) {
     let mut buf = Vec::with_capacity(cap);
     encode(&v, &mut buf);
     b.iter_custom(|iters| {
