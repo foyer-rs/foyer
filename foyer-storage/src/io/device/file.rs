@@ -148,8 +148,9 @@ impl DeviceBuilder for FileDeviceBuilder {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use foyer_common::error::ErrorKind;
+
+    use super::*;
 
     #[test]
     fn test_file_device_builder_rejects_path_without_parent() {

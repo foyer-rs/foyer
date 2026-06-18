@@ -125,7 +125,10 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, path::Path};
+    #[cfg(not(madsim))]
+    #[cfg(target_os = "linux")]
+    use std::num::NonZeroUsize;
+    use std::path::Path;
 
     use rand::{Fill, rng};
     use tempfile::tempdir;
@@ -143,6 +146,8 @@ mod tests {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
 
+    #[cfg(not(madsim))]
+    #[cfg(target_os = "linux")]
     fn nonzero(value: usize) -> NonZeroUsize {
         match NonZeroUsize::new(value) {
             Some(value) => value,

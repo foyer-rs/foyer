@@ -181,8 +181,9 @@ impl Device for FsDevice {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use foyer_common::error::ErrorKind;
+
+    use super::*;
 
     #[test]
     fn test_fs_device_builder_propagates_dir_creation_errors() {
