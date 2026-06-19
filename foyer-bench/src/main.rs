@@ -25,6 +25,7 @@ use std::{
     collections::BTreeMap,
     fs::create_dir_all,
     net::SocketAddr,
+    num::NonZeroUsize,
     ops::{Deref, Range},
     sync::{
         Arc,
@@ -127,12 +128,12 @@ struct Args {
     block_size: ByteSize,
 
     /// Flusher count.
-    #[arg(long, default_value_t = 4)]
-    flushers: usize,
+    #[arg(long, default_value = "4")]
+    flushers: NonZeroUsize,
 
     /// Reclaimer count.
-    #[arg(long, default_value_t = 4)]
-    reclaimers: usize,
+    #[arg(long, default_value = "4")]
+    reclaimers: NonZeroUsize,
 
     /// Writer count.
     #[arg(long, default_value_t = 16)]
@@ -146,8 +147,8 @@ struct Args {
     recover_mode: RecoverMode,
 
     /// Recover concurrency.
-    #[arg(long, default_value_t = 16)]
-    recover_concurrency: usize,
+    #[arg(long, default_value = "16")]
+    recover_concurrency: NonZeroUsize,
 
     /// Disk write iops throttle.
     #[arg(long, default_value_t = 0)]
@@ -170,8 +171,8 @@ struct Args {
     clean_block_threshold: usize,
 
     /// Shards of both in-memory cache and disk cache indexer.
-    #[arg(long, default_value_t = 64)]
-    shards: usize,
+    #[arg(long, default_value = "64")]
+    shards: NonZeroUsize,
 
     /// weigher to enable metrics exporter
     #[arg(long, default_value_t = false)]
@@ -277,14 +278,14 @@ struct Args {
     #[arg(long, default_value_t = false)]
     direct: bool,
 
-    #[arg(long, default_value_t = 1)]
-    io_uring_threads: usize,
+    #[arg(long, default_value = "1")]
+    io_uring_threads: NonZeroUsize,
 
     #[arg(long, required = false)]
     io_uring_cpus: Vec<u32>,
 
-    #[arg(long, default_value_t = 64)]
-    io_uring_iodepth: usize,
+    #[arg(long, default_value = "64")]
+    io_uring_iodepth: NonZeroUsize,
 
     #[arg(long, default_value_t = false)]
     io_uring_sqpoll: bool,
@@ -516,9 +517,9 @@ async fn benchmark(args: Args) {
         builder
             .with_metrics_registry(Box::new(PrometheusMetricsRegistry::new(registry)))
             .memory(args.mem.as_u64() as _)
-            .with_shards(args.shards)
+            .with_shards(args.shards.get())
     } else {
-        builder.memory(args.mem.as_u64() as _).with_shards(args.shards)
+        builder.memory(args.mem.as_u64() as _).with_shards(args.shards.get())
     };
 
     let builder = match args.eviction.as_str() {
