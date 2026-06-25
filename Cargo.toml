@@ -16,7 +16,7 @@ version = "0.23.0-dev"
 edition = "2024"
 rust-version = "1.86.0"
 repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://foyer-rs.github.io/foyer"
+homepage = "https://github.com/foyer-rs/foyer"
 keywords = ["cache", "hybrid"]
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 license = "Apache-2.0"
@@ -32,12 +32,12 @@ bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 cfg-if = "1"
 clap = { version = "4", features = ["derive"] }
-cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.5"
 core_affinity = "0.8"
 criterion = "0.8.2"
 csv = "1"
+datasketches = { version = "0.3.0", default-features = false }
 equivalent = "1"
 fastant = "0.1.11"
 fastrace = "0.7"
@@ -87,6 +87,9 @@ tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
 tokio = { package = "foyer-tokio", version = "0.23.0-dev", path = "foyer-tokio", default-features = false }
+# tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
+# Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
+tonic = { version = ">=0.14, <0.14.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 twox-hash = { version = "2.1.2", default-features = false }

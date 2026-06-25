@@ -411,7 +411,7 @@ where
         .await?;
 
         let io_buffer_size = self.buffer_pool_size / self.flushers;
-        for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
+        for (flusher, rx) in flushers.iter().zip(rxs) {
             flusher.run(
                 rx,
                 block_size,
