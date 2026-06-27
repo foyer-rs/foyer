@@ -231,8 +231,7 @@ jobs:
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example hybrid
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example hybrid_full
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example event_listener
-          cargo llvm-cov --no-report run ${{ matrix.serde }} --features "tracing,jaeger" --example tail_based_tracing
-          cargo llvm-cov --no-report run ${{ matrix.serde }} --features "tracing,ot" --example tail_based_tracing
+          cargo llvm-cov --no-report run ${{ matrix.serde }} --features "tracing,otel" --example tail_based_tracing
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example equivalent
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example export_metrics_prometheus_hyper
           cargo llvm-cov --no-report run ${{ matrix.serde }} --example serde

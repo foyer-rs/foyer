@@ -15,8 +15,7 @@ publish = false
 
 [features]
 serde = ["foyer/serde"]
-jaeger = ["fastrace-jaeger"]
-ot = [
+otel = [
   "fastrace-opentelemetry",
   "opentelemetry",
   "opentelemetry-otlp",
@@ -28,7 +27,6 @@ ot = [
 anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
-fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true, features = ["runtime-tokio"] }
 http-body-util = { workspace = true }
@@ -56,7 +54,7 @@ tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
 
-# `tonic` is not used directly in example code, but it must be listed as a dep so the `ot` feature
+# `tonic` is not used directly in example code, but it must be listed as a dep so the `otel` feature
 # can opt into the tonic-backed gRPC transport for `opentelemetry-otlp` (`grpc-tonic`).
 # Tell cargo-machete to ignore it so CI doesn't flag it as unused.
 [package.metadata.cargo-machete]
