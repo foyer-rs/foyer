@@ -821,11 +821,10 @@ async fn write(
         };
 
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if let Some(limiter) = &mut limiter {
-            if let Some(wait) = limiter.consume(entry_size as f64) {
+        if let Some(limiter) = &mut limiter
+            && let Some(wait) = limiter.consume(entry_size as f64) {
                 tokio::time::sleep(wait).await;
             }
-        }
 
         let time = Instant::now();
         let ctx = context.clone();
@@ -929,11 +928,10 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
-            if let Some(limiter) = &mut limiter {
-                if let Some(wait) = limiter.consume(entry_size as f64) {
+            if let Some(limiter) = &mut limiter
+                && let Some(wait) = limiter.consume(entry_size as f64) {
                     tokio::time::sleep(wait).await;
                 }
-            }
 
             if record {
                 if let Err(e) = context.metrics.get_hit_lats.write().record(lat) {

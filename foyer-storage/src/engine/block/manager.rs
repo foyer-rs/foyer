@@ -375,17 +375,16 @@ impl BlockManager {
     fn reclaim_if_needed(&self, state: &mut RwLockWriteGuard<'_, State>) {
         if state.clean_blocks.len() < self.inner.clean_block_threshold
             && state.reclaiming_blocks.len() < self.inner.reclaim_concurrency
+            && let Some(block) = self.evict(state)
         {
-            if let Some(block) = self.evict(state) {
-                state.reclaiming_blocks.insert(block.id());
-                self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
-                let block = ReclaimingBlock {
-                    block_manager: self.clone(),
-                    block,
-                };
-                let future = self.inner.reclaimer.reclaim(block);
-                self.inner.spawner.spawn(future);
-            }
+            state.reclaiming_blocks.insert(block.id());
+            self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
+            let block = ReclaimingBlock {
+                block_manager: self.clone(),
+                block,
+            };
+            let future = self.inner.reclaimer.reclaim(block);
+            self.inner.spawner.spawn(future);
         }
     }
 

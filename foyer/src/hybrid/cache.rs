@@ -967,15 +967,14 @@ where
         let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll(cx));
 
-        if let Ok(entry) = res.as_ref() {
-            if entry.properties().location() != Location::InMem
+        if let Ok(entry) = res.as_ref()
+            && entry.properties().location() != Location::InMem
                 && *this.policy == HybridCachePolicy::WriteOnInsertion
                 && this.store.is_enabled()
                 && !this.ctx.throttled.load(Ordering::Relaxed)
             {
                 this.store.enqueue(entry.piece(), false);
             }
-        }
 
         match res.as_ref() {
             Ok(e) => match e.source() {
