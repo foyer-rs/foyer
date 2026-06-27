@@ -199,9 +199,10 @@ where
         };
 
         if let (Some(elapsed), Some(threshold)) = (this.root.elapsed(), this.threshold.as_ref())
-            && &elapsed < threshold {
-                this.root.cancel();
-            }
+            && &elapsed < threshold
+        {
+            this.root.cancel();
+        }
 
         Poll::Ready(res)
     }

@@ -143,10 +143,11 @@ where
 
     fn remove(&mut self, record: &Arc<Record<Self>>) {
         if let Some(ref hand_ptr) = self.hand
-            && Arc::ptr_eq(hand_ptr, record) {
-                // Reset hand if we are removing the current hand pointer
-                self.hand = None;
-            }
+            && Arc::ptr_eq(hand_ptr, record)
+        {
+            // Reset hand if we are removing the current hand pointer
+            self.hand = None;
+        }
 
         unsafe { self.queue.remove_from_ptr(Arc::as_ptr(record)) };
         record.set_in_eviction(false);

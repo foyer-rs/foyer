@@ -969,12 +969,12 @@ where
 
         if let Ok(entry) = res.as_ref()
             && entry.properties().location() != Location::InMem
-                && *this.policy == HybridCachePolicy::WriteOnInsertion
-                && this.store.is_enabled()
-                && !this.ctx.throttled.load(Ordering::Relaxed)
-            {
-                this.store.enqueue(entry.piece(), false);
-            }
+            && *this.policy == HybridCachePolicy::WriteOnInsertion
+            && this.store.is_enabled()
+            && !this.ctx.throttled.load(Ordering::Relaxed)
+        {
+            this.store.enqueue(entry.piece(), false);
+        }
 
         match res.as_ref() {
             Ok(e) => match e.source() {

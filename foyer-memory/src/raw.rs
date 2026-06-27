@@ -567,9 +567,10 @@ where
             properties = properties.with_phantom(true);
         }
         if let Some(location) = properties.location()
-            && location == Location::OnDisk {
-                properties = properties.with_phantom(true);
-            }
+            && location == Location::OnDisk
+        {
+            properties = properties.with_phantom(true);
+        }
         let record = Arc::new(Record::new(Data {
             key,
             value,
