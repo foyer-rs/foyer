@@ -240,7 +240,7 @@ More code examples and details can be found [here](https://github.com/foyer-rs/f
 
 ## Supported Rust Versions
 
-*foyer* is built against the recent stable release. The minimum supported version is 1.86.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+*foyer* is built against the recent stable release. The minimum supported version is 1.91.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
 ## Supported Platforms
 

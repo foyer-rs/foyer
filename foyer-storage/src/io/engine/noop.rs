@@ -47,7 +47,7 @@ impl IoEngine for NoopIoEngine {
         .into()
     }
 
-    fn write(&self, buf: Box<dyn IoBuf>, _: &dyn Partition, _: u64) -> super::IoHandle {
+    fn write(&self, buf: Box<dyn IoBuf>, _: &dyn Partition, _: u64) -> IoHandle {
         async move {
             let buf: Box<dyn IoB> = buf.into_iob();
             (buf, Ok(()))
