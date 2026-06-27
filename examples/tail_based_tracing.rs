@@ -16,16 +16,7 @@ use std::time::Duration;
 
 use foyer::{BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, TracingOptions};
 
-#[cfg(feature = "jaeger")]
-fn init_jaeger_exporter() {
-    let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "example").unwrap();
-    fastrace::set_reporter(
-        reporter,
-        fastrace::collector::Config::default().report_interval(Duration::from_millis(1)),
-    );
-}
-
-#[cfg(feature = "ot")]
+#[cfg(feature = "otel")]
 fn init_opentelemetry_exporter() {
     use std::borrow::Cow;
 
@@ -54,21 +45,11 @@ fn init_opentelemetry_exporter() {
     fastrace::set_reporter(reporter, Config::default());
 }
 
-fn init_exporter() {
-    #[cfg(feature = "jaeger")]
-    init_jaeger_exporter();
-
-    #[cfg(feature = "ot")]
-    init_opentelemetry_exporter();
-
-    #[cfg(not(any(feature = "jaeger", feature = "ot")))]
-    panic!("Either jaeger or opentelemetry feature must be enabled!");
-}
-
-/// NOTE: To run this example, please enable feature "tracing" and either "jaeger" or "ot".
+/// NOTE: To run this example, please enable feature "tracing" and "otel".
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_exporter();
+    #[cfg(feature = "otel")]
+    init_opentelemetry_exporter();
 
     let dir = tempfile::tempdir()?;
 

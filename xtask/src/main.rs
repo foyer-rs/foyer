@@ -191,11 +191,7 @@ fn example() {
     run_with_env(r#"cargo run --example hybrid_full"#, [("RUST_BACKTRACE", "1")]);
     run_with_env(r#"cargo run --example event_listener"#, [("RUST_BACKTRACE", "1")]);
     run_with_env(
-        r#"cargo run --features "tracing,jaeger" --example tail_based_tracing"#,
-        [("RUST_BACKTRACE", "1")],
-    );
-    run_with_env(
-        r#"cargo run --features "tracing,ot" --example tail_based_tracing"#,
+        r#"cargo run --features "tracing,otel" --example tail_based_tracing"#,
         [("RUST_BACKTRACE", "1")],
     );
     run_with_env(r#"cargo run --example equivalent"#, [("RUST_BACKTRACE", "1")]);

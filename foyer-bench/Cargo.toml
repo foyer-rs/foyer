@@ -19,7 +19,14 @@ tokio-console = ["dep:console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
-tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
+tracing = [
+  "fastrace/enable",
+  "foyer/tracing",
+  "fastrace-opentelemetry",
+  "opentelemetry",
+  "opentelemetry-otlp",
+  "opentelemetry_sdk",
+]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -27,7 +34,7 @@ bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 fastrace = { workspace = true, optional = true }
-fastrace-jaeger = { workspace = true, optional = true }
+fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true, features = [
   "runtime-tokio",
   "tracing",
@@ -43,6 +50,14 @@ hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
 mea = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, features = [
+  "grpc-tonic",
+], optional = true }
+opentelemetry_sdk = { workspace = true, features = [
+  "rt-tokio",
+  "trace",
+], optional = true }
 parking_lot = { workspace = true }
 prometheus = { workspace = true }
 rand = { workspace = true, features = ["thread_rng"] }
