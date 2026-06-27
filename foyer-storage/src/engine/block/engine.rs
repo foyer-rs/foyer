@@ -341,10 +341,10 @@ where
 
             let max_entries = device.capacity() / PAGE;
             let pages = max_entries / TombstoneLog::SLOTS_PER_PAGE
-                + if max_entries % TombstoneLog::SLOTS_PER_PAGE > 0 {
-                    1
-                } else {
+                + if max_entries.is_multiple_of(TombstoneLog::SLOTS_PER_PAGE) {
                     0
+                } else {
+                    1
                 };
             let partition = device.create_partition(pages * PAGE)?;
             partitions.push(partition);

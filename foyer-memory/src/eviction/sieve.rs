@@ -121,7 +121,8 @@ where
         };
 
         loop {
-            if let Some(record) = candidate.get() {
+            {
+                let record = candidate.get()?;
                 let state = unsafe { &*record.state().get() };
                 if !state.is_visited() {
                     break;
@@ -133,9 +134,6 @@ where
                         candidate.move_next();
                     }
                 }
-            } else {
-                // Queue is empty, no record to evict
-                return None;
             }
         }
 
@@ -144,11 +142,11 @@ where
     }
 
     fn remove(&mut self, record: &Arc<Record<Self>>) {
-        if let Some(ref hand_ptr) = self.hand {
-            if Arc::ptr_eq(hand_ptr, record) {
-                // Reset hand if we are removing the current hand pointer
-                self.hand = None;
-            }
+        if let Some(ref hand_ptr) = self.hand
+            && Arc::ptr_eq(hand_ptr, record)
+        {
+            // Reset hand if we are removing the current hand pointer
+            self.hand = None;
         }
 
         unsafe { self.queue.remove_from_ptr(Arc::as_ptr(record)) };

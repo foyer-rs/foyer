@@ -126,10 +126,10 @@ where
 {
     fn evict(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if self.small_weight > self.small_weight_capacity {
-            if let Some(record) = self.evict_small() {
-                return Some(record);
-            }
+        if self.small_weight > self.small_weight_capacity
+            && let Some(record) = self.evict_small()
+        {
+            return Some(record);
         }
         if let Some(record) = self.evict_main() {
             return Some(record);
