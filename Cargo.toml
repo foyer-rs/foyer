@@ -14,7 +14,7 @@ members = [
 [workspace.package]
 version = "0.23.0-dev"
 edition = "2024"
-rust-version = "1.86.0"
+rust-version = "1.91.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://github.com/foyer-rs/foyer"
 keywords = ["cache", "hybrid"]
