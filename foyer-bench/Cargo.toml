@@ -19,7 +19,7 @@ tokio-console = ["dep:console-subscriber"]
 strict_assertions = ["foyer/strict_assertions"]
 jemalloc = ["dep:tikv-jemallocator"]
 jeprof = ["jemalloc", "tikv-jemallocator?/profiling"]
-tracing = ["fastrace/enable", "foyer/tracing", "dep:fastrace-jaeger"]
+tracing = ["fastrace/enable", "foyer/tracing"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -27,7 +27,6 @@ bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
 fastrace = { workspace = true, optional = true }
-fastrace-jaeger = { workspace = true, optional = true }
 foyer = { workspace = true, features = [
   "runtime-tokio",
   "tracing",
