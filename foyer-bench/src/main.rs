@@ -419,8 +419,31 @@ fn setup() {
 
 #[cfg(feature = "tracing")]
 fn setup() {
+    use std::borrow::Cow;
+
     use fastrace::collector::Config;
-    let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
+    use fastrace_opentelemetry::OpenTelemetryReporter;
+    use opentelemetry::{InstrumentationScope, KeyValue};
+    use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+    use opentelemetry_sdk::Resource;
+
+    let reporter = OpenTelemetryReporter::new(
+        SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint("http://127.0.0.1:4317".to_string())
+            .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+            .with_timeout(opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT)
+            .build()
+            .expect("initialize otlp exporter"),
+        Cow::Owned(
+            Resource::builder()
+                .with_attributes([KeyValue::new("service.name", "foyer-bench")])
+                .build(),
+        ),
+        InstrumentationScope::builder("foyer-bench")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build(),
+    );
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
@@ -821,10 +844,10 @@ async fn write(
         };
 
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if let Some(limiter) = &mut limiter {
-            if let Some(wait) = limiter.consume(entry_size as f64) {
-                tokio::time::sleep(wait).await;
-            }
+        if let Some(limiter) = &mut limiter
+            && let Some(wait) = limiter.consume(entry_size as f64)
+        {
+            tokio::time::sleep(wait).await;
         }
 
         let time = Instant::now();
@@ -929,10 +952,10 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
-            if let Some(limiter) = &mut limiter {
-                if let Some(wait) = limiter.consume(entry_size as f64) {
-                    tokio::time::sleep(wait).await;
-                }
+            if let Some(limiter) = &mut limiter
+                && let Some(wait) = limiter.consume(entry_size as f64)
+            {
+                tokio::time::sleep(wait).await;
             }
 
             if record {
