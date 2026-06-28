@@ -33,7 +33,7 @@ pub use crate::{
     },
     memory::{
         Cache, CacheBuilder, CacheEntry, CacheProperties, EvictionConfig, FifoConfig, Filter, GetOrFetch, LfuConfig,
-        LruConfig, S3FifoConfig, Weighter,
+        LruConfig, S3FifoConfig, SieveConfig, Weighter,
     },
     storage::{
         AdmitAll, Block, BlockEngineConfig, BlockStatistics, CombinedDeviceBuilder, Compression, Device, DeviceBuilder,
