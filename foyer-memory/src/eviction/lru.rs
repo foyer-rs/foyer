@@ -81,16 +81,41 @@ where
     V: Value,
     P: Properties,
 {
+    fn actual_high_priority_weight(&self) -> usize {
+        let mut weight = 0;
+        let mut cursor = self.high_priority_list.cursor();
+        loop {
+            cursor.move_next();
+            match cursor.get() {
+                Some(record) => weight += record.weight(),
+                None => break,
+            }
+        }
+        weight
+    }
+
+    fn decrease_high_priority_weight(&mut self, weight: usize) {
+        if let Some(weight) = self.high_priority_weight.checked_sub(weight) {
+            self.high_priority_weight = weight;
+        } else {
+            self.high_priority_weight = self.actual_high_priority_weight();
+        }
+        if self.high_priority_list.is_empty() {
+            self.high_priority_weight = 0;
+        }
+    }
+
     fn may_overflow_high_priority_pool(&mut self) {
         while self.high_priority_weight > self.high_priority_weight_capacity {
-            strict_assert!(!self.high_priority_list.is_empty());
-
             // overflow last entry in high priority pool to low priority pool
-            let record = self.high_priority_list.pop_front().unwrap();
+            let Some(record) = self.high_priority_list.pop_front() else {
+                self.high_priority_weight = self.actual_high_priority_weight();
+                break;
+            };
             let state = unsafe { &mut *record.state().get() };
             strict_assert!(state.in_high_priority_pool);
             state.in_high_priority_pool = false;
-            self.high_priority_weight -= record.weight();
+            self.decrease_high_priority_weight(record.weight());
             self.list.push_back(record);
         }
     }
@@ -184,7 +209,7 @@ where
         strict_assert!(!state.link.is_linked());
 
         if state.in_high_priority_pool {
-            self.high_priority_weight -= record.weight();
+            self.decrease_high_priority_weight(record.weight());
             state.in_high_priority_pool = false;
         }
 
@@ -199,17 +224,21 @@ where
         strict_assert!(state.link.is_linked());
 
         match (state.is_pinned, state.in_high_priority_pool) {
-            (true, false) => unsafe { self.pin_list.remove_from_ptr(Arc::as_ptr(record)) },
+            (true, false) => unsafe {
+                self.pin_list.remove_from_ptr(Arc::as_ptr(record));
+            },
             (true, true) => unsafe {
                 state.in_high_priority_pool = false;
-                self.pin_list.remove_from_ptr(Arc::as_ptr(record))
+                self.pin_list.remove_from_ptr(Arc::as_ptr(record));
             },
             (false, true) => {
-                self.high_priority_weight -= record.weight();
                 state.in_high_priority_pool = false;
-                unsafe { self.high_priority_list.remove_from_ptr(Arc::as_ptr(record)) }
+                unsafe { self.high_priority_list.remove_from_ptr(Arc::as_ptr(record)) };
+                self.decrease_high_priority_weight(record.weight());
             }
-            (false, false) => unsafe { self.list.remove_from_ptr(Arc::as_ptr(record)) },
+            (false, false) => unsafe {
+                self.list.remove_from_ptr(Arc::as_ptr(record));
+            },
         };
 
         strict_assert!(!state.link.is_linked());
@@ -260,7 +289,7 @@ where
             };
 
             if state.in_high_priority_pool {
-                this.high_priority_weight -= record.weight();
+                this.decrease_high_priority_weight(record.weight());
             }
 
             this.pin_list.push_back(r);
@@ -545,5 +574,107 @@ pub mod tests {
         lru.update(0, None).unwrap();
 
         assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![record]]);
+    }
+
+    #[test]
+    fn test_lru_overflow_recovers_empty_high_priority_list() {
+        let config = LruConfig {
+            high_priority_pool_ratio: 0.5,
+        };
+        let mut lru = TestLru::new(8, &config);
+
+        // Regression for externally observed invariant drift: the tracked
+        // high-priority weight says overflow is needed, but the intrusive
+        // high-priority list has no entries left to demote.
+        lru.high_priority_weight = 1;
+
+        lru.update(0, None).unwrap();
+
+        assert_eq!(lru.high_priority_weight, 0);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_lru_overflow_recovers_understated_high_priority_weight() {
+        let rs = (0..2)
+            .map(|i| {
+                Arc::new(Record::new(Data {
+                    key: i,
+                    value: i,
+                    properties: TestProperties::default().with_hint(Hint::Normal),
+                    hash: i,
+                    weight: 100,
+                }))
+            })
+            .collect_vec();
+        let r = |i: usize| rs[i].clone();
+
+        let config = LruConfig {
+            high_priority_pool_ratio: 1.0,
+        };
+        let mut lru = TestLru::new(250, &config);
+
+        lru.push(r(0));
+        lru.push(r(1));
+        lru.high_priority_weight = 1;
+
+        lru.update(0, None).unwrap();
+
+        assert_eq!(lru.high_priority_weight, 0);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![r(0), r(1)], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_lru_overflow_resets_overstated_weight_after_last_high_priority_entry() {
+        let record = Arc::new(Record::new(Data {
+            key: 0u64,
+            value: 0u64,
+            properties: TestProperties::default().with_hint(Hint::Normal),
+            hash: 0,
+            weight: 1,
+        }));
+
+        let config = LruConfig {
+            high_priority_pool_ratio: 1.0,
+        };
+        let mut lru = TestLru::new(1_000, &config);
+
+        lru.push(record.clone());
+        lru.high_priority_weight = 1_000;
+
+        lru.update(999, None).unwrap();
+
+        assert_eq!(lru.high_priority_weight, 0);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![record], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_lru_acquire_recovers_understated_high_priority_weight() {
+        let rs = (0..2)
+            .map(|i| {
+                Arc::new(Record::new(Data {
+                    key: i,
+                    value: i,
+                    properties: TestProperties::default().with_hint(Hint::Normal),
+                    hash: i,
+                    weight: 100,
+                }))
+            })
+            .collect_vec();
+        let r = |i: usize| rs[i].clone();
+
+        let config = LruConfig {
+            high_priority_pool_ratio: 1.0,
+        };
+        let mut lru = TestLru::new(250, &config);
+
+        lru.push(r(0));
+        lru.push(r(1));
+        lru.high_priority_weight = 1;
+
+        lru.acquire_mutable(&rs[0]);
+
+        assert_eq!(lru.high_priority_weight, 100);
+        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![r(1)], vec![r(0)]]);
     }
 }
