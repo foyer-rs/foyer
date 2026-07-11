@@ -3,6 +3,7 @@
 - Status: Draft
 - Scope: `foyer-common`, `foyer-storage`, and `foyer`
 - Target: A staged, backward-compatible refactor
+- Translation: [Simplified Chinese](disk-cache-codec.zh-CN.md)
 
 ## 1. Summary
 
@@ -72,6 +73,7 @@ The write path is already allocation-friendly: `EntrySerializer` writes directly
 - `Engine::load` returns a `'static` future and `Load::Entry` owns `K` and `V`. A result borrowing from the read buffer cannot safely escape.
 - A disk hit may be promoted into the memory cache. The result must remain valid independently of the load future.
 - `IoEngine::read` returns the submitted buffer, so its owner can be retained without changing the low-level psync or io_uring read model.
+- `bytes::Bytes::from_owner` preserves the owner's pointer without copying, but `Bytes` does not provide a type-level alignment guarantee. Slicing may shift the pointer by an arbitrary offset.
 - The current entry header is 36 bytes, and the value begins immediately after it. This does not provide sufficient payload alignment for general archived formats.
 - Compression runs before `Code::decode`; a view cannot point directly into compressed bytes.
 - Compression configuration appears at both the store and block-engine layers. The codec refactor should establish one owner for the transform pipeline and prevent configuration drift.
@@ -104,7 +106,8 @@ pub struct OwnedBytes {
 impl OwnedBytes {
     pub fn from_owner(owner: impl AsRef<[u8]> + Send + 'static) -> Self;
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Self;
-    pub fn alignment(&self) -> usize;
+    pub fn address_alignment(&self) -> usize;
+    pub fn is_aligned_to(&self, alignment: usize) -> bool;
 }
 
 impl AsRef<[u8]> for OwnedBytes { /* ... */ }
@@ -112,7 +115,23 @@ impl AsRef<[u8]> for OwnedBytes { /* ... */ }
 
 The concrete implementation may use `bytes::Bytes::from_owner`. The owner is the buffer returned by `IoEngine::read`, not a copied `Vec<u8>`. Slices share the same owner and may begin at arbitrary byte offsets.
 
-`OwnedBytes` must not expose engine-specific buffer types. Its constructor and alignment calculation should remain internal to `foyer-storage` until the safety contract is stable.
+`OwnedBytes` must not expose engine-specific buffer types. Its constructor and alignment calculation should remain internal to `foyer-storage` until the safety contract is stable. `address_alignment` reports a property of the current slice pointer, not a stable guarantee of the `OwnedBytes` type. Every derived slice must be validated independently.
+
+The direct-I/O buffer and decode-view layers remain separate:
+
+```text
+Direct I/O submission:
+Raw / IoSliceMut / IoBuf
+  -> mutable when used for reads
+  -> pointer and length satisfy direct-I/O alignment
+
+After I/O completion:
+IoSliceMut -> IoSlice -> Bytes::from_owner -> OwnedBytes
+  -> immutable owner-backed view
+  -> arbitrary zero-copy payload slices
+```
+
+`Bytes` and `OwnedBytes` are not replacements for `IoBuf` or `IoBufMut`. Direct reads continue to use a mutable aligned buffer. An immutable `Bytes` value may be adapted for direct writes only after validating its pointer, length, and file offset; arbitrary `Bytes::slice` results must not be assumed to remain direct-I/O compatible. Converting an owner-backed `Bytes` into `BytesMut` performs a deep copy and is not a path back to the original mutable I/O allocation.
 
 ### 6.2 Value Codec
 
@@ -240,7 +259,7 @@ The new codec path requires a versioned entry envelope. The complete byte layout
 - Checksum algorithm and checksum.
 - Payload alignment, or enough information to validate it.
 
-The block-engine v2 layout should use an aligned payload start instead of placing the payload immediately after the current 36-byte header. A fixed 64-byte header is a reasonable initial option, but the implementation must derive offsets from codec-declared alignment rather than relying on a constant that happens to be aligned. Codec alignment must be a power of two and must not exceed I/O page alignment unless an engine explicitly advertises a stronger guarantee.
+The block-engine v2 layout should use an aligned payload start instead of placing the payload immediately after the current 36-byte header. A fixed 64-byte header is a reasonable initial option, but the implementation must derive offsets from codec-declared alignment rather than relying on a constant that happens to be aligned. Codec alignment must be a power of two and must not exceed I/O page alignment unless an engine explicitly advertises a stronger guarantee. Validation must use the actual payload slice pointer; a 4K-aligned backing allocation does not imply that every `Bytes` slice is aligned.
 
 Recovery behavior:
 
@@ -256,22 +275,26 @@ An engine supports the codec layer when it satisfies the following contract:
 
 1. It uses the configured codec for size estimation, encoding, and decoding.
 2. It encodes directly into an engine-owned destination or an equivalent bounded writer; pre-serializing every enqueue is not required.
-3. Its read result can be converted into `OwnedBytes` without copying.
-4. It honors `EntryLayoutRequirements`, or rejects the codec at build time with a capability error.
-5. It stores and validates codec format metadata in its entry envelope.
-6. It applies checksums and compression in the common order defined by this RFC.
+3. It submits a mutable buffer satisfying its direct-I/O pointer and length requirements, then converts the completed read result into `OwnedBytes` without copying.
+4. It does not treat arbitrary `OwnedBytes` or `Bytes` slices as direct-I/O-compatible buffers.
+5. It honors `EntryLayoutRequirements`, or rejects the codec at build time with a capability error.
+6. It stores and validates codec format metadata in its entry envelope.
+7. It applies checksums and compression in the common order defined by this RFC.
 
 Add explicit capabilities so that incompatibility is detected at build time:
 
 ```rust
 pub struct EngineCapabilities {
+    pub direct_io_alignment: usize,
     pub owner_backed_reads: bool,
     pub max_payload_alignment: usize,
     pub direct_encode: bool,
 }
 ```
 
-The current block engine, psync I/O engine, and io_uring I/O engine can satisfy owner-backed reads because completion returns the submitted buffer. `NoopEngine` trivially supports every codec because it never persists or decodes entries.
+`direct_io_alignment` describes the alignment required when submitting I/O. `max_payload_alignment` describes the strongest alignment the entry layout can provide to a codec payload. These are separate capabilities: preserving a 4K-aligned allocation does not make an arbitrary payload slice 4K-aligned.
+
+The current block engine, psync I/O engine, and io_uring I/O engine can satisfy owner-backed reads because completion returns the submitted buffer. Direct reads continue to use `IoSliceMut`; the returned owner is wrapped as `Bytes` only after completion. `NoopEngine` trivially supports every codec because it never persists or decodes entries.
 
 Future engines do not need serde-, bincode-, or archive-specific code. An engine that cannot retain a read buffer may still support owned codecs, but it must reject codecs that declare `requires_owner_backed_input`.
 
@@ -363,6 +386,7 @@ This stage validates ownership without changing the public codec API or disk for
 - Verify that the hash-collision path still compares the decoded key correctly.
 - Verify that the owner remains alive after `Engine::load` returns and after promotion into the memory cache.
 - Verify that cloned cache entries safely share the backing owner.
+- Verify that wrapping a full aligned I/O owner preserves its pointer and that an unaligned `Bytes` slice fails alignment validation.
 - Verify that every drop order releases the buffer exactly once.
 - Return typed errors without panicking for malformed offsets, lengths, alignments, checksums, and archive roots.
 - Recover legacy entries with `LegacyCodeCodec`.
