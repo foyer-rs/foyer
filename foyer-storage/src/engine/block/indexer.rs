@@ -17,7 +17,8 @@ use std::{
     sync::Arc,
 };
 
-use foyer_common::hasher::ModHasher;
+use foyer_common::{error::Result, hasher::ModHasher, spawn::Spawner};
+use futures_util::{StreamExt, TryStreamExt, stream};
 use itertools::Itertools;
 use parking_lot::RwLock;
 
@@ -59,15 +60,22 @@ type IndexerShard = HashMap<u64, Index, ModHasher>;
 #[derive(Debug, Clone)]
 pub struct Indexer {
     shards: Arc<Vec<RwLock<IndexerShard>>>,
+    shard_mask: usize,
 }
 
 impl Indexer {
     pub fn new(shards: usize) -> Self {
+        let shard_mask = if shards.is_power_of_two() {
+            shards - 1
+        } else {
+            usize::MAX
+        };
         let shards = (0..shards)
             .map(|_| RwLock::new(HashMap::with_hasher(ModHasher::default())))
             .collect_vec();
         Self {
             shards: Arc::new(shards),
+            shard_mask,
         }
     }
 
@@ -86,6 +94,38 @@ impl Indexer {
         fastrace::trace(name = "foyer::storage::block::indexer::insert_batch")
     )]
     pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
+        self.partition_batch(batch)
+            .into_iter()
+            .enumerate()
+            .filter(|(_, batch)| !batch.is_empty())
+            .flat_map(|(shard, batch)| self.insert_shard_batch(shard, batch))
+            .collect()
+    }
+
+    pub(super) async fn insert_recovery_batch(
+        &self,
+        batch: Vec<HashedEntryAddress>,
+        concurrency: usize,
+        spawner: Spawner,
+    ) -> Result<()> {
+        let this = self.clone();
+        stream::iter(
+            self.partition_batch(batch)
+                .into_iter()
+                .enumerate()
+                .filter(|(_, batch)| !batch.is_empty())
+                .map(move |(shard, batch)| {
+                    let this = this.clone();
+                    spawner.spawn(async move { this.insert_shard_batch_discard(shard, batch) })
+                }),
+        )
+        .buffer_unordered(concurrency.max(1))
+        .try_collect::<Vec<_>>()
+        .await
+        .map(drop)
+    }
+
+    fn partition_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<Vec<HashedEntryAddress>> {
         let mut counts = vec![0; self.shards.len()];
         for haddr in &batch {
             counts[self.shard(haddr.hash)] += 1;
@@ -96,27 +136,37 @@ impl Indexer {
             let shard = self.shard(haddr.hash);
             shards[shard].push(haddr);
         }
+        shards
+    }
 
+    fn insert_shard_batch(&self, shard: usize, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
         let mut olds = vec![];
-        for (s, batch) in shards.into_iter().enumerate() {
-            if batch.is_empty() {
-                continue;
-            }
-            let mut shard = self.shards[s].write();
-            let available = shard.capacity().saturating_sub(shard.len());
-            if available < batch.len() {
-                shard.reserve(batch.len() - available);
-            }
-            for haddr in batch {
-                if let Some(old) = self.insert_inner(&mut shard, haddr.hash, Index::Address(haddr.address)) {
-                    olds.push(HashedEntryAddress {
-                        hash: haddr.hash,
-                        address: old,
-                    });
-                }
+        self.insert_shard_batch_with(shard, batch, |hash, address| {
+            olds.push(HashedEntryAddress { hash, address });
+        });
+        olds
+    }
+
+    fn insert_shard_batch_discard(&self, shard: usize, batch: Vec<HashedEntryAddress>) {
+        self.insert_shard_batch_with(shard, batch, |_, _| {});
+    }
+
+    fn insert_shard_batch_with(
+        &self,
+        shard: usize,
+        batch: Vec<HashedEntryAddress>,
+        mut on_old: impl FnMut(u64, EntryAddress),
+    ) {
+        let mut shard = self.shards[shard].write();
+        let available = shard.capacity().saturating_sub(shard.len());
+        if available < batch.len() {
+            shard.reserve(batch.len());
+        }
+        for haddr in batch {
+            if let Some(old) = self.insert_inner(&mut shard, haddr.hash, Index::Address(haddr.address)) {
+                on_old(haddr.hash, old);
             }
         }
-        olds
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::storage::block::indexer::get"))]
@@ -180,9 +230,30 @@ impl Indexer {
         self.shards.iter().for_each(|shard| shard.write().clear());
     }
 
+    pub(super) fn compact_and_count(&self) -> usize {
+        self.shards
+            .iter()
+            .map(|shard| {
+                let mut shard = shard.write();
+                if shard.capacity() > shard.len().saturating_mul(2) {
+                    shard.shrink_to_fit();
+                }
+                shard.len()
+            })
+            .sum()
+    }
+
     #[inline(always)]
     fn shard(&self, hash: u64) -> usize {
-        hash as usize % self.shards.len()
+        // Select the shard from mixed high bits. `IndexerShard` uses the original hash with `ModHasher`, so reusing
+        // its low bits here would make every key in a shard start in the same group of hash table buckets.
+        const GOLDEN_RATIO: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mixed = (hash.wrapping_mul(GOLDEN_RATIO) >> 32) as usize;
+        if self.shard_mask != usize::MAX {
+            mixed & self.shard_mask
+        } else {
+            mixed % self.shards.len()
+        }
     }
 
     fn insert_inner(&self, shard: &mut IndexerShard, hash: u64, index: Index) -> Option<EntryAddress> {
@@ -207,6 +278,97 @@ impl Indexer {
         match index {
             Index::Address(addr) => Some(addr),
             Index::Tombstone(_) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    fn haddr(hash: u64, sequence: Sequence) -> HashedEntryAddress {
+        HashedEntryAddress {
+            hash,
+            address: EntryAddress {
+                block: 0,
+                offset: 0,
+                len: 1,
+                sequence,
+            },
+        }
+    }
+
+    #[test]
+    fn test_shard_selection_does_not_reuse_hash_low_bits() {
+        let indexer = Indexer::new(64);
+        let mut low_bits = (0..64).map(|_| HashSet::new()).collect_vec();
+        for hash in 0..4096 {
+            low_bits[indexer.shard(hash)].insert(hash & 63);
+        }
+        assert!(low_bits.iter().all(|bits| bits.len() > 16));
+    }
+
+    #[test]
+    fn test_compact_duplicate_heavy_batch() {
+        let indexer = Indexer::new(4);
+        indexer.insert_batch((0..10_000).map(|sequence| haddr(sequence % 10, sequence)).collect());
+
+        let capacity_before = indexer
+            .shards
+            .iter()
+            .map(|shard| shard.read().capacity())
+            .sum::<usize>();
+        assert_eq!(indexer.compact_and_count(), 10);
+        let capacity_after = indexer
+            .shards
+            .iter()
+            .map(|shard| shard.read().capacity())
+            .sum::<usize>();
+
+        assert!(capacity_after < capacity_before);
+        for hash in 0..10 {
+            assert_eq!(indexer.get(hash).unwrap().sequence, 9_990 + hash);
+        }
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_recovery_batch_preserves_equal_sequence_order() {
+        let indexer = Indexer::new(4);
+        let mut first = haddr(7, 42);
+        first.address.block = 1;
+        let mut last = haddr(7, 42);
+        last.address.block = 2;
+
+        indexer
+            .insert_recovery_batch(vec![first, haddr(11, 1), last], 4, Spawner::current())
+            .await
+            .unwrap();
+
+        assert_eq!(indexer.get(7).unwrap().block, 2);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_recovery_batch_matches_insert_batch() {
+        let expected = Indexer::new(7);
+        let actual = Indexer::new(7);
+        let batch = (0..10_000)
+            .map(|i| {
+                let mut entry = haddr((i * 31 % 257) as u64, (i * 17 % 101) as Sequence);
+                entry.address.block = i as BlockId;
+                entry
+            })
+            .collect_vec();
+
+        expected.insert_batch(batch.clone());
+        actual
+            .insert_recovery_batch(batch, 8, Spawner::current())
+            .await
+            .unwrap();
+
+        for hash in 0..257 {
+            assert_eq!(actual.get(hash), expected.get(hash));
         }
     }
 }
