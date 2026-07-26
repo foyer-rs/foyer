@@ -93,8 +93,10 @@ impl Indexer {
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::block::indexer::insert_batch")
     )]
-    pub fn insert_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
-        self.partition_batch(batch)
+    pub fn insert_batch(&self, mut batch: Vec<HashedEntryAddress>) -> Vec<HashedEntryAddress> {
+        let shards = self.partition_batch(&mut batch);
+        drop(batch);
+        shards
             .into_iter()
             .enumerate()
             .filter(|(_, batch)| !batch.is_empty())
@@ -104,7 +106,7 @@ impl Indexer {
 
     pub(super) async fn insert_recovery_batch(
         &self,
-        batch: Vec<HashedEntryAddress>,
+        batch: &mut Vec<HashedEntryAddress>,
         concurrency: usize,
         spawner: Spawner,
     ) -> Result<()> {
@@ -125,14 +127,14 @@ impl Indexer {
         .map(drop)
     }
 
-    fn partition_batch(&self, batch: Vec<HashedEntryAddress>) -> Vec<Vec<HashedEntryAddress>> {
+    fn partition_batch(&self, batch: &mut Vec<HashedEntryAddress>) -> Vec<Vec<HashedEntryAddress>> {
         let mut counts = vec![0; self.shards.len()];
-        for haddr in &batch {
+        for haddr in batch.iter() {
             counts[self.shard(haddr.hash)] += 1;
         }
 
         let mut shards = counts.iter().map(|count| Vec::with_capacity(*count)).collect_vec();
-        for haddr in batch {
+        for haddr in batch.drain(..) {
             let shard = self.shard(haddr.hash);
             shards[shard].push(haddr);
         }
@@ -284,8 +286,6 @@ impl Indexer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
 
     fn haddr(hash: u64, sequence: Sequence) -> HashedEntryAddress {
@@ -303,11 +303,11 @@ mod tests {
     #[test]
     fn test_shard_selection_does_not_reuse_hash_low_bits() {
         let indexer = Indexer::new(64);
-        let mut low_bits = (0..64).map(|_| HashSet::new()).collect_vec();
+        let mut low_bits = [0u64; 64];
         for hash in 0..4096 {
-            low_bits[indexer.shard(hash)].insert(hash & 63);
+            low_bits[indexer.shard(hash)] |= 1 << (hash & 63);
         }
-        assert!(low_bits.iter().all(|bits| bits.len() > 16));
+        assert!(low_bits.iter().all(|bits| bits.count_ones() > 16));
     }
 
     #[test]
@@ -334,41 +334,38 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    async fn test_recovery_batch_preserves_equal_sequence_order() {
-        let indexer = Indexer::new(4);
-        let mut first = haddr(7, 42);
-        first.address.block = 1;
-        let mut last = haddr(7, 42);
-        last.address.block = 2;
-
-        indexer
-            .insert_recovery_batch(vec![first, haddr(11, 1), last], 4, Spawner::current())
-            .await
-            .unwrap();
-
-        assert_eq!(indexer.get(7).unwrap().block, 2);
-    }
-
-    #[test_log::test(tokio::test)]
-    async fn test_recovery_batch_matches_insert_batch() {
+    async fn test_recovery_batches_match_insert_batch() {
         let expected = Indexer::new(7);
         let actual = Indexer::new(7);
-        let batch = (0..10_000)
+        let mut batch = (0..10_000)
             .map(|i| {
                 let mut entry = haddr((i * 31 % 257) as u64, (i * 17 % 101) as Sequence);
                 entry.address.block = i as BlockId;
                 entry
             })
             .collect_vec();
+        batch[126] = haddr(u64::MAX, 42);
+        batch[126].address.block = 1;
+        batch[127] = haddr(u64::MAX, 42);
+        batch[127].address.block = 2;
 
         expected.insert_batch(batch.clone());
-        actual
-            .insert_recovery_batch(batch, 8, Spawner::current())
-            .await
-            .unwrap();
+        let mut entries = batch.into_iter();
+        let mut chunk = Vec::with_capacity(127);
+        loop {
+            chunk.extend(entries.by_ref().take(127));
+            if chunk.is_empty() {
+                break;
+            }
+            actual
+                .insert_recovery_batch(&mut chunk, 8, Spawner::current())
+                .await
+                .unwrap();
+        }
 
         for hash in 0..257 {
             assert_eq!(actual.get(hash), expected.get(hash));
         }
+        assert_eq!(actual.get(u64::MAX), expected.get(u64::MAX));
     }
 }
