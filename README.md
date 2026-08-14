@@ -267,12 +267,4 @@ Don't forget to pass `cargo x --fast` (which runs most necessary checks and test
 
 If you want to run a broader range of checks locally, run `cargo x`. 🙌
 
-Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
-
-<!-- rustdoc-ignore-start -->
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=foyer-rs/foyer&type=Date)](https://www.star-history.com/#foyer-rs/foyer&Date)
-
-<!-- rustdoc-ignore-end -->
+Thank you for your contribution <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
