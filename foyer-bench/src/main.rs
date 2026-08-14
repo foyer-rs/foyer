@@ -47,7 +47,7 @@ use foyer::{
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
-use mea::{broadcast, oneshot};
+use asyncband::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{

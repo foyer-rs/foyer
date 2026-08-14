@@ -31,7 +31,7 @@ use foyer_common::{
 };
 use futures_util::future::BoxFuture;
 use hashbrown::hash_table::{Entry, HashTable};
-use mea::oneshot;
+use asyncband::oneshot;
 
 use crate::{Eviction, Piece, indexer::Indexer, raw::RawCacheEntry};
 

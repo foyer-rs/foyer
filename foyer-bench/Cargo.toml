@@ -48,7 +48,7 @@ humantime = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
-mea = { workspace = true }
+asyncband = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, features = [

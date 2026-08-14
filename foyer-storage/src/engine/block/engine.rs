@@ -39,7 +39,7 @@ use futures_util::{
     future::{join_all, try_join_all},
 };
 use itertools::Itertools;
-use mea::mpsc::UnboundedReceiver;
+use asyncband::mpsc::UnboundedReceiver;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},

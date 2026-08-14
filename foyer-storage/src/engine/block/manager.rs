@@ -33,7 +33,7 @@ use futures_util::{
     future::{Shared, ready},
 };
 use itertools::Itertools;
-use mea::oneshot;
+use asyncband::oneshot;
 use rand::seq::IteratorRandom;
 
 use crate::{

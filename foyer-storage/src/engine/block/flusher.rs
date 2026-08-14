@@ -38,7 +38,7 @@ use futures_util::{
     future::{try_join, try_join_all},
 };
 use itertools::Itertools;
-use mea::{
+use asyncband::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
 };
@@ -157,7 +157,7 @@ where
         submit_queue_size: Arc<AtomicUsize>,
         metrics: Arc<Metrics>,
     ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
-        let (tx, rx) = mea::mpsc::unbounded();
+        let (tx, rx) = asyncband::mpsc::unbounded();
         let this = Self {
             id,
             tx,

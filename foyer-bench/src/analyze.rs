@@ -37,7 +37,7 @@ use std::{
 use bytesize::ByteSize;
 use foyer::Statistics;
 use hdrhistogram::Histogram;
-use mea::broadcast;
+use asyncband::broadcast;
 use parking_lot::RwLock;
 
 // latencies are measured by 'us'

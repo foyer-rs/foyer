@@ -24,7 +24,7 @@ use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{IoUring, opcode, types::Fd};
-use mea::oneshot;
+use asyncband::oneshot;
 
 use crate::{
     RawFile,
