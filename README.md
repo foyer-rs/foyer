@@ -273,6 +273,6 @@ Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foy
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=foyer-rs/foyer&type=Date)](https://www.star-history.com/#foyer-rs/foyer&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=foyer-rs/foyer&type=Date)](https://star-history.dera.page/#foyer-rs/foyer&Date)
 
 <!-- rustdoc-ignore-end -->
