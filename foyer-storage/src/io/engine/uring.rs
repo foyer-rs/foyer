@@ -17,6 +17,7 @@ use std::{
     sync::{Arc, mpsc},
 };
 
+use asyncband::oneshot;
 use core_affinity::CoreId;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
@@ -24,7 +25,6 @@ use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 use io_uring::{IoUring, opcode, types::Fd};
-use asyncband::oneshot;
 
 use crate::{
     RawFile,

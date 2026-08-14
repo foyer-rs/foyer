@@ -34,6 +34,7 @@ use std::{
 };
 
 use analyze::{Metrics, analyze, monitor};
+use asyncband::{broadcast, oneshot};
 use bytesize::ByteSize;
 use clap::{ArgGroup, Parser, builder::PossibleValuesParser};
 use exporter::PrometheusExporter;
@@ -47,7 +48,6 @@ use foyer::{
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
-use asyncband::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{

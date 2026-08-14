@@ -1040,9 +1040,9 @@ where
 mod tests {
     use std::{path::Path, sync::Arc};
 
+    use asyncband::barrier::Barrier;
     use foyer_common::{hasher::ModHasher, properties::Source};
     use foyer_storage::{StorageFilter, test_utils::*};
-    use asyncband::barrier::Barrier;
     use storage::test_utils::Biased;
 
     use crate::*;

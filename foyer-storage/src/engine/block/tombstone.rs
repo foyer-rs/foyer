@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
+use asyncband::mutex::Mutex;
 use bytes::{Buf, BufMut};
 use foyer_common::error::Result;
-use asyncband::mutex::Mutex;
 
 use crate::{
     IoEngine,

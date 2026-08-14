@@ -22,6 +22,7 @@ use std::{
     },
 };
 
+use asyncband::oneshot;
 use foyer_common::{
     error::{ErrorKind, Result},
     metrics::Metrics,
@@ -33,7 +34,6 @@ use futures_util::{
     future::{Shared, ready},
 };
 use itertools::Itertools;
-use asyncband::oneshot;
 use rand::seq::IteratorRandom;
 
 use crate::{
