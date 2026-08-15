@@ -19,10 +19,11 @@ pub use crate::{
     engine::{
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
         block::{
-            engine::BlockEngineConfig,
+            engine::{BlockEngine, BlockEngineConfig},
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             manager::{Block, BlockStatistics},
         },
+        noop::{NoopEngine, NoopEngineConfig},
     },
     filter::{
         StorageFilter, StorageFilterCondition, StorageFilterResult,
@@ -45,5 +46,6 @@ pub use crate::{
             psync::{PsyncIoEngine, PsyncIoEngineConfig},
         },
     },
+    keeper::PieceRef,
     store::{Store, StoreBuilder},
 };

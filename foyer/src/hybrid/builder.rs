@@ -24,7 +24,7 @@ use foyer_common::{
     spawn::Spawner,
 };
 use foyer_memory::{Cache, CacheBuilder, EvictionConfig, Filter, Weighter};
-use foyer_storage::{Compression, EngineConfig, IoEngineConfig, RecoverMode, StoreBuilder};
+use foyer_storage::{Compression, Engine, EngineConfig, IoEngineConfig, NoopEngineConfig, RecoverMode, StoreBuilder};
 use mixtrics::{metrics::BoxedRegistry, registry::noop::NoopMetricsRegistry};
 
 use crate::hybrid::cache::{
@@ -237,24 +237,26 @@ where
 }
 
 /// Hybrid cache builder modify the disk cache configurations.
-pub struct HybridCacheBuilderPhaseStorage<K, V, S>
+pub struct HybridCacheBuilderPhaseStorage<K, V, S, EC = NoopEngineConfig<K, V, HybridCacheProperties>>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    EC: EngineConfig<K, V, HybridCacheProperties>,
 {
     name: Cow<'static, str>,
     options: HybridCacheOptions,
     metrics: Arc<Metrics>,
     memory: Cache<K, V, S, HybridCacheProperties>,
-    builder: StoreBuilder<K, V, S, HybridCacheProperties>,
+    builder: StoreBuilder<K, V, S, HybridCacheProperties, EC>,
 }
 
-impl<K, V, S> HybridCacheBuilderPhaseStorage<K, V, S>
+impl<K, V, S, EC> HybridCacheBuilderPhaseStorage<K, V, S, EC>
 where
     K: StorageKey,
     V: StorageValue,
     S: HashBuilder + Debug,
+    EC: EngineConfig<K, V, HybridCacheProperties>,
 {
     /// Set io engine config for the disk cache store.
     pub fn with_io_engine_config(self, config: impl Into<Box<dyn IoEngineConfig>>) -> Self {
@@ -269,9 +271,12 @@ where
     }
 
     /// Set engine config for the disk cache store.
-    pub fn with_engine_config(self, config: impl Into<Box<dyn EngineConfig<K, V, HybridCacheProperties>>>) -> Self {
+    pub fn with_engine_config<EC2: EngineConfig<K, V, HybridCacheProperties>>(
+        self,
+        config: EC2,
+    ) -> HybridCacheBuilderPhaseStorage<K, V, S, EC2> {
         let builder = self.builder.with_engine_config(config);
-        Self {
+        HybridCacheBuilderPhaseStorage {
             name: self.name,
             options: self.options,
             metrics: self.metrics,
@@ -329,7 +334,10 @@ where
     }
 
     /// Build and open the hybrid cache with the given configurations.
-    pub async fn build(self) -> Result<HybridCache<K, V, S>> {
+    pub async fn build(self) -> Result<HybridCache<K, V, S, EC::Engine>>
+    where
+        EC::Engine: Engine<K, V, HybridCacheProperties>,
+    {
         let builder = self.builder;
 
         let piped = match (builder.is_noop(), self.options.policy) {
