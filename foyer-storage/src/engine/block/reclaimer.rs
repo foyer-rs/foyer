@@ -29,10 +29,9 @@ use crate::{
     Statistics, StorageFilter,
     engine::block::{
         flusher::{Flusher, Submission},
-        indexer::Indexer,
+        indexer::{EntryAddress, Indexer},
         manager::{Block, ReclaimingBlock},
         scanner::BlockScanner,
-        serde::Sequence,
     },
     io::{
         PAGE,
@@ -151,8 +150,7 @@ where
                         flusher.submit(Submission::Reinsertion {
                             reinsertion: Reinsertion {
                                 hash: info.hash,
-                                len: info.addr.len as usize,
-                                sequence: info.addr.sequence,
+                                source: info.addr,
                                 slice,
                             },
                         });
@@ -202,7 +200,6 @@ impl BlockCleaner {
 #[derive(Debug)]
 pub struct Reinsertion {
     pub hash: u64,
-    pub len: usize,
-    pub sequence: Sequence,
+    pub source: EntryAddress,
     pub slice: IoSlice,
 }

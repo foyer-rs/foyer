@@ -76,6 +76,8 @@ pub struct Metrics {
 
     pub storage_block_engine_indexer_conflict: BoxedCounter,
     pub storage_block_engine_enqueue_skip: BoxedCounter,
+    pub storage_block_engine_reinsert: BoxedCounter,
+    pub storage_block_engine_reinsert_skip_obsolete: BoxedCounter,
     pub storage_block_engine_buffer_efficiency: BoxedHistogram,
     pub storage_block_engine_recover_duration: BoxedHistogram,
 
@@ -279,6 +281,10 @@ impl Metrics {
             foyer_storage_block_engine_op_total.counter(&[name.clone(), "indexer_conflict".into()]);
         let storage_block_engine_enqueue_skip =
             foyer_storage_block_engine_op_total.counter(&[name.clone(), "enqueue_skip".into()]);
+        let storage_block_engine_reinsert =
+            foyer_storage_block_engine_op_total.counter(&[name.clone(), "reinsert".into()]);
+        let storage_block_engine_reinsert_skip_obsolete =
+            foyer_storage_block_engine_op_total.counter(&[name.clone(), "reinsert_skip_obsolete".into()]);
         let storage_block_engine_buffer_efficiency =
             foyer_storage_block_engine_buffer_efficiency.histogram(std::slice::from_ref(&name));
         let storage_block_engine_recover_duration =
@@ -358,6 +364,8 @@ impl Metrics {
             storage_entry_deserialize_duration,
             storage_block_engine_indexer_conflict,
             storage_block_engine_enqueue_skip,
+            storage_block_engine_reinsert,
+            storage_block_engine_reinsert_skip_obsolete,
             storage_block_engine_buffer_efficiency,
             storage_block_engine_recover_duration,
 

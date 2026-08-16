@@ -62,6 +62,10 @@ use crate::{
     keeper::PieceRef,
 };
 
+fn is_current_reinsertion(indexer: &Indexer, hash: u64, source: &EntryAddress) -> bool {
+    indexer.get(hash).as_ref() == Some(source)
+}
+
 pub enum Submission<K, V, P>
 where
     K: StorageKey,
@@ -445,13 +449,22 @@ where
 
             Submission::Tombstone { tombstone, stats } => self.tombstone_infos.push(TombstoneInfo { tombstone, stats }),
             Submission::Reinsertion { reinsertion } => {
-                // Skip reinsertion if the entry is not in the indexer.
-                if self.indexer.get(reinsertion.hash).is_some() {
-                    report(self.buffer.as_mut().unwrap().push_slice(
-                        &reinsertion.slice[..reinsertion.len],
+                // Only reinsert if the index still points to the physical entry being reclaimed.
+                // A disk hit can be promoted to memory and then evicted back with a newer sequence
+                // while the old disk region is being scanned. Hash existence alone would let that
+                // obsolete physical copy consume another disk write before the sequence check.
+                if is_current_reinsertion(&self.indexer, reinsertion.hash, &reinsertion.source) {
+                    let enqueued = self.buffer.as_mut().unwrap().push_slice(
+                        &reinsertion.slice[..reinsertion.source.len as usize],
                         reinsertion.hash,
-                        reinsertion.sequence,
-                    ));
+                        reinsertion.source.sequence,
+                    );
+                    if enqueued {
+                        self.metrics.storage_block_engine_reinsert.increase(1);
+                    }
+                    report(enqueued);
+                } else {
+                    self.metrics.storage_block_engine_reinsert_skip_obsolete.increase(1);
                 }
             }
             Submission::Wait { tx } => self.waiters.push(tx),
@@ -678,5 +691,49 @@ where
         self.metrics
             .storage_queue_rotate_duration
             .record(init.elapsed().as_secs_f64());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reinsertion_requires_exact_source_address() {
+        let indexer = Indexer::new(1);
+        let hash = 7;
+        let source = EntryAddress {
+            block: 1,
+            offset: 4096,
+            len: 4096,
+            sequence: 1,
+        };
+        indexer.insert_batch(vec![HashedEntryAddress {
+            hash,
+            address: source.clone(),
+        }]);
+        assert!(is_current_reinsertion(&indexer, hash, &source));
+
+        indexer.insert_batch(vec![HashedEntryAddress {
+            hash,
+            address: EntryAddress {
+                block: 2,
+                offset: 8192,
+                len: 4096,
+                sequence: 1,
+            },
+        }]);
+        assert!(!is_current_reinsertion(&indexer, hash, &source));
+
+        indexer.insert_batch(vec![HashedEntryAddress {
+            hash,
+            address: EntryAddress {
+                block: 3,
+                offset: 12288,
+                len: 4096,
+                sequence: 2,
+            },
+        }]);
+        assert!(!is_current_reinsertion(&indexer, hash, &source));
     }
 }
