@@ -24,6 +24,10 @@ use std::{
     time::Instant,
 };
 
+use asyncband::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
@@ -38,10 +42,6 @@ use futures_util::{
     future::{try_join, try_join_all},
 };
 use itertools::Itertools;
-use mea::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
 
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
@@ -157,7 +157,7 @@ where
         submit_queue_size: Arc<AtomicUsize>,
         metrics: Arc<Metrics>,
     ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
-        let (tx, rx) = mea::mpsc::unbounded();
+        let (tx, rx) = asyncband::mpsc::unbounded();
         let this = Self {
             id,
             tx,
