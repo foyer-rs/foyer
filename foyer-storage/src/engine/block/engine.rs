@@ -23,6 +23,7 @@ use std::{
     time::Instant,
 };
 
+use asyncband::mpsc::UnboundedReceiver;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
 use foyer_common::{
@@ -39,7 +40,6 @@ use futures_util::{
     future::{join_all, try_join_all},
 };
 use itertools::Itertools;
-use mea::mpsc::UnboundedReceiver;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
