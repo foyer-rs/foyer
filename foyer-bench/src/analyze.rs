@@ -29,12 +29,11 @@
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
 
-use asyncband::broadcast;
 use bytesize::ByteSize;
 use foyer::Statistics;
 use hdrhistogram::Histogram;
@@ -315,7 +314,7 @@ pub async fn monitor(
     total_secs: Duration,
     warm_up: Duration,
     metrics: Metrics,
-    mut stop: broadcast::overflow::Receiver<()>,
+    stop: Arc<AtomicBool>,
 ) {
     let start = Instant::now();
 
@@ -334,9 +333,8 @@ pub async fn monitor(
 
     loop {
         let now = Instant::now();
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
 
         tokio::time::sleep(interval).await;
