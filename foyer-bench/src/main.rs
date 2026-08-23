@@ -28,13 +28,13 @@ use std::{
     ops::{Deref, Range},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use analyze::{Metrics, analyze, monitor};
-use asyncband::{broadcast, oneshot};
+use asyncband::oneshot;
 use bytesize::ByteSize;
 use clap::{ArgGroup, Parser, builder::PossibleValuesParser};
 use exporter::PrometheusExporter;
@@ -680,7 +680,7 @@ async fn benchmark(args: Args) {
 
     let metrics_dump_start = metrics.dump();
 
-    let (stop_tx, _) = broadcast::overflow::channel(4096);
+    let stop = Arc::new(AtomicBool::new(false));
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
@@ -691,18 +691,18 @@ async fn benchmark(args: Args) {
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
             metrics,
-            stop_tx.subscribe(),
+            stop.clone(),
         )
     });
 
     let time = Instant::now();
 
-    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
+    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop.clone()));
 
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         tracing::warn!("foyer-bench is cancelled with CTRL-C");
-        stop_tx.send(());
+        stop.store(true, Ordering::Relaxed);
     });
 
     handle_bench.await.unwrap();
@@ -732,12 +732,7 @@ async fn benchmark(args: Args) {
     teardown();
 }
 
-async fn bench(
-    args: Args,
-    hybrid: HybridCache<u64, Value>,
-    metrics: Metrics,
-    stop_tx: broadcast::overflow::Sender<()>,
-) {
+async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop: Arc<AtomicBool>) {
     let w_rate = if args.w_rate.as_u64() == 0 {
         None
     } else {
@@ -767,22 +762,17 @@ async fn bench(
     });
 
     let w_handles = (0..args.writers)
-        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop.clone())))
         .collect_vec();
     let r_handles = (0..args.readers)
-        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop.clone())))
         .collect_vec();
 
     join_all(w_handles).await;
     join_all(r_handles).await;
 }
 
-async fn write(
-    id: u64,
-    hybrid: HybridCache<u64, Value>,
-    context: Arc<Context>,
-    mut stop: broadcast::overflow::Receiver<()>,
-) {
+async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
@@ -829,9 +819,8 @@ async fn write(
     loop {
         let l = Instant::now();
 
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
         if start.elapsed() >= context.time + context.warm_up {
             return;
@@ -893,7 +882,7 @@ async fn write(
     }
 }
 
-async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::overflow::Receiver<()>) {
+async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
@@ -903,9 +892,8 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     let mut osrng = StdRng::try_from_rng(&mut SysRng).unwrap();
 
     loop {
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
         if start.elapsed() >= context.time + context.warm_up {
             return;
