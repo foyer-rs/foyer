@@ -1461,6 +1461,25 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_flush_if() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        hybrid.insert(2, vec![2; 7 * KB]);
+
+        hybrid.memory().flush_if(|key, _| *key == 1).await;
+        hybrid.storage().wait().await;
+
+        assert!(hybrid.memory().get(&1).is_none());
+        assert!(hybrid.memory().get(&2).is_some());
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
+            (1, vec![1; 7 * KB])
+        );
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_load_after_recovery() {
         let open = |dir| async move {
             HybridCacheBuilder::new()
