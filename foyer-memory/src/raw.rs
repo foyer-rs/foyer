@@ -696,10 +696,10 @@ where
             shard.write().evict(0, &mut garbages);
         }
 
-        self.flush_garbages(garbages).await;
+        self.flush_evicted(garbages).await;
     }
 
-    async fn flush_garbages(&self, garbages: Vec<(Event, Arc<Record<E>>)>) {
+    async fn flush_evicted(&self, garbages: Vec<(Event, Arc<Record<E>>)>) {
         // Deallocate data out of the lock critical section.
         let piped = self.pipe.is_enabled();
 
@@ -861,7 +861,7 @@ where
         }
 
         drop(predicate);
-        self.flush_garbages(garbages).await;
+        self.flush_evicted(garbages).await;
     }
 }
 
