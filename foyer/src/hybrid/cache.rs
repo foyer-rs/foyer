@@ -612,6 +612,19 @@ where
         Ok(())
     }
 
+    /// Flush in-memory entries matching the predicate to the disk cache.
+    ///
+    /// The matching entries are removed from the in-memory cache. This function obeys the io throttler of the disk
+    /// cache and makes sure all matching entries are offloaded.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.inner.memory.flush_if(predicate).await;
+    }
+
     /// Gracefully close the hybrid cache.
     ///
     /// `close` will wait for the ongoing flush and reclaim tasks to finish.
@@ -1467,7 +1480,7 @@ mod tests {
         hybrid.insert(1, vec![1; 7 * KB]);
         hybrid.insert(2, vec![2; 7 * KB]);
 
-        hybrid.memory().flush_if(|key, _| *key == 1).await;
+        hybrid.flush_if(|key, _| *key == 1).await;
         hybrid.storage().wait().await;
 
         assert!(hybrid.memory().get(&1).is_none());
