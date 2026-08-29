@@ -27,7 +27,12 @@ impl EventListener for EchoEventListener {
     }
 }
 
-/// Output:
+/// Expected output:
+///
+/// The first four lines are deterministic (replace / FIFO eviction while inserting).
+/// The last three lines are the remaining entries released when `cache` is dropped at
+/// the end of `main`; the keys are `100` / `101` / `102`, but the release order is not
+/// guaranteed, so they are written as `..` below.
 ///
 /// ```plain
 /// Entry [key = 2] [value = First] is released.
