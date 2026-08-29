@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use foyer_common::error::{Error, ErrorKind, Result};
+
 #[cfg(target_os = "linux")]
 pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
@@ -47,4 +49,3 @@ pub use crate::{
     },
     store::{Store, StoreBuilder},
 };
-pub use foyer_common::error::{Error, ErrorKind, Result};

@@ -14,6 +14,7 @@
 
 //! Compile-time tests for engine-device compatibility declarations.
 
+#[cfg(not(madsim))]
 #[test]
 fn engine_device_compatibility() {
     let tests = trybuild::TestCases::new();

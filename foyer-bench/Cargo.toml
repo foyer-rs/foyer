@@ -30,6 +30,7 @@ tracing = [
 
 [dependencies]
 anyhow = { workspace = true }
+asyncband = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
@@ -48,7 +49,6 @@ humantime = { workspace = true }
 hyper = { workspace = true, features = ["server", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 itertools = { workspace = true }
-asyncband = { workspace = true }
 mixtrics = { workspace = true, features = ["prometheus"] }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, features = [

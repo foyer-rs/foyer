@@ -28,6 +28,7 @@ strict_assertions = [
 [dependencies]
 allocator-api2 = { workspace = true }
 anyhow = { workspace = true }
+asyncband = { workspace = true }
 bytes = { workspace = true }
 clap = { workspace = true, optional = true }
 equivalent = { workspace = true }
@@ -42,7 +43,6 @@ hashbrown = { workspace = true }
 itertools = { workspace = true }
 libc = { workspace = true }
 lz4 = { workspace = true }
-asyncband = { workspace = true }
 parking_lot = { workspace = true }
 pin-project = { workspace = true }
 rand = { workspace = true, features = ["thread_rng"] }

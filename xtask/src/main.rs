@@ -112,31 +112,7 @@ fn tools(yes: bool) {
         "cargo install cargo-nextest --locked",
         yes,
     );
-    check_and_install(
-        "license-eye",
-        "which license-eye",
-        &format!(
-            r#"
-            wget -P /tmp https://github.com/apache/skywalking-eyes/releases/download/v0.7.0/skywalking-license-eye-0.7.0-bin.tgz && \
-            tar -xzf /tmp/skywalking-license-eye-0.7.0-bin.tgz -C /tmp && \
-            cp /tmp/skywalking-license-eye-0.7.0-bin/bin/{}/license-eye ~/.cargo/bin/license-eye
-            "#,
-            if cfg!(target_os = "linux") {
-                "linux"
-            } else if cfg!(target_os = "macos") {
-                "darwin"
-            } else if cfg!(target_os = "windows") {
-                "windows"
-            } else {
-                println!(
-                    "Unsupported OS for {name} installation.",
-                    name = "license-eye".magenta()
-                );
-                exit(1);
-            },
-        ),
-        yes,
-    );
+    check_and_install("hawkeye", "which hawkeye", "cargo install hawkeye --locked", yes);
 }
 
 fn check(fast: bool) {
@@ -210,7 +186,7 @@ fn udeps() {
 }
 
 fn license() {
-    run("license-eye header check");
+    run("hawkeye check");
 }
 
 fn madsim() {
