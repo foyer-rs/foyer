@@ -1,0 +1,27 @@
+error[E0277]: device `UnsupportedDevice` is not compatible with engine config `BlockEngineConfig<_, _, _>`
+  --> tests/ui/engine_device_compatibility/unsupported.rs:51:82
+   |
+51 |     let _: BlockEngineConfig<u64, u64, CacheProperties> = BlockEngineConfig::new(device);
+   |                                                           ---------------------- ^^^^^^ unsupported engine-device combination
+   |                                                           |
+   |                                                           required by a bound introduced by this call
+   |
+help: the trait `DeviceFor<BlockEngineConfig<_, _, _>>` is not implemented for `UnsupportedDevice`
+  --> tests/ui/engine_device_compatibility/unsupported.rs:21:1
+   |
+21 | struct UnsupportedDevice;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `DeviceFor<E>`:
+             CombinedDevice
+             FileDevice
+             FsDevice
+             NoopDevice
+             PartialDevice
+note: required by a bound in `BlockEngineConfig::<K, V, P>::new`
+  --> src/engine/block/engine.rs
+   |
+   |     pub fn new<D>(device: Arc<D>) -> Self
+   |            --- required by a bound in this associated function
+   |     where
+   |         D: DeviceFor<Self>,
+   |            ^^^^^^^^^^^^^^^ required by this bound in `BlockEngineConfig::<K, V, P>::new`

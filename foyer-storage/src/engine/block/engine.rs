@@ -49,7 +49,7 @@ use super::{
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
-    Device, Load, RejectAll, StorageFilter, StorageFilterResult,
+    Device, DeviceFor, Load, RejectAll, StorageFilter, StorageFilterResult,
     compress::Compression,
     engine::{
         Engine, EngineBuildContext, EngineConfig, Populated,
@@ -137,7 +137,11 @@ where
     P: Properties,
 {
     /// Create a new block-based disk cache engine builder with default configurations.
-    pub fn new(device: Arc<dyn Device>) -> Self {
+    pub fn new<D>(device: Arc<D>) -> Self
+    where
+        D: DeviceFor<Self>,
+    {
+        let device: Arc<dyn Device> = device;
         Self {
             device,
             block_size: 16 * 1024 * 1024, // 16 MiB

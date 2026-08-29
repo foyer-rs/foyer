@@ -91,6 +91,7 @@ tokio = { package = "foyer-tokio", version = "0.23.0-dev", path = "foyer-tokio",
 tonic = { version = "0.14.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+trybuild = "1"
 twox-hash = { version = "2.1.2", default-features = false }
 zstd = "0.13"
 

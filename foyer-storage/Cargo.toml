@@ -62,6 +62,7 @@ foyer-memory = { workspace = true, features = ["test_utils"] }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
 tokio = { workspace = true }
+trybuild = { workspace = true }
 
 [lints]
 workspace = true

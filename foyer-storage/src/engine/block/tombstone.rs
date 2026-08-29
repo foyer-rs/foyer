@@ -252,7 +252,7 @@ mod tests {
     use crate::{
         IoEngineConfig, PsyncIoEngineConfig,
         io::{
-            device::{DeviceBuilder, fs::FsDeviceBuilder},
+            device::{Device, DeviceBuilder, fs::FsDeviceBuilder},
             engine::IoEngineBuildContext,
         },
     };

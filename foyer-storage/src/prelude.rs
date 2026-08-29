@@ -30,12 +30,12 @@ pub use crate::{
     },
     io::{
         device::{
-            Device, DeviceBuilder, RawFile,
-            combined::CombinedDeviceBuilder,
-            file::FileDeviceBuilder,
-            fs::FsDeviceBuilder,
-            noop::NoopDeviceBuilder,
-            partial::PartialDeviceBuilder,
+            Device, DeviceBuilder, DeviceFor, Partition, PartitionId, RawFile,
+            combined::{CombinedDevice, CombinedDeviceBuilder},
+            file::{FileDevice, FileDeviceBuilder},
+            fs::{FsDevice, FsDeviceBuilder},
+            noop::{NoopDevice, NoopDeviceBuilder},
+            partial::{PartialDevice, PartialDeviceBuilder},
             statistics::Statistics,
             throttle::{IopsCounter, Throttle},
         },
@@ -47,3 +47,4 @@ pub use crate::{
     },
     store::{Store, StoreBuilder},
 };
+pub use foyer_common::error::{Error, ErrorKind, Result};
