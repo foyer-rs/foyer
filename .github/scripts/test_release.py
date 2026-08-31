@@ -35,52 +35,7 @@ def package(name, version="1.2.3", publish=None, dependencies=None):
     }
 
 
-def local_dependency(name, kind=None):
-    return {"name": name, "kind": kind, "path": f"/{name}"}
-
-
 class ReleaseTest(unittest.TestCase):
-    def test_plan_packages_uses_dependency_order(self):
-        metadata = {
-            "packages": [
-                package("foyer", dependencies=[local_dependency("foyer-storage")]),
-                package("foyer-common", dependencies=[local_dependency("foyer-tokio")]),
-                package(
-                    "foyer-storage", dependencies=[local_dependency("foyer-common")]
-                ),
-                package("foyer-tokio"),
-                package("xtask", publish=[]),
-            ]
-        }
-
-        self.assertEqual(
-            release.plan_packages(metadata),
-            ["foyer-tokio", "foyer-common", "foyer-storage", "foyer"],
-        )
-
-    def test_plan_packages_ignores_dev_dependencies(self):
-        metadata = {
-            "packages": [
-                package(
-                    "foyer", dependencies=[local_dependency("foyer-common", "dev")]
-                ),
-                package("foyer-common", dependencies=[local_dependency("foyer")]),
-            ]
-        }
-
-        self.assertEqual(release.plan_packages(metadata), ["foyer", "foyer-common"])
-
-    def test_plan_packages_rejects_dependency_cycles(self):
-        metadata = {
-            "packages": [
-                package("foyer", dependencies=[local_dependency("foyer-common")]),
-                package("foyer-common", dependencies=[local_dependency("foyer")]),
-            ]
-        }
-
-        with self.assertRaisesRegex(release.ReleaseError, "dependency cycle"):
-            release.plan_packages(metadata)
-
     def test_version_from_tag_accepts_stable_semver(self):
         self.assertEqual(release.version_from_tag("v1.2.3"), "1.2.3")
 
@@ -117,26 +72,6 @@ class ReleaseTest(unittest.TestCase):
 
             with self.assertRaisesRegex(release.ReleaseError, "no foyer 1.2.4"):
                 release.validate_changelog("1.2.4", changelog)
-
-    def test_validate_published_prefix_accepts_partial_release(self):
-        release.validate_published_prefix(
-            ["foyer-common", "foyer-storage", "foyer"],
-            [True, True, False],
-        )
-
-    def test_validate_published_prefix_rejects_gap(self):
-        with self.assertRaisesRegex(release.ReleaseError, "unpublished dependency"):
-            release.validate_published_prefix(
-                ["foyer-common", "foyer-storage", "foyer"],
-                [True, False, True],
-            )
-
-    def test_registry_propagation_failure_is_retryable(self):
-        self.assertTrue(
-            release.is_retryable_publish_failure(
-                "failed to select a version for the requirement `foyer-common = ^1.2.3`"
-            )
-        )
 
 
 if __name__ == "__main__":

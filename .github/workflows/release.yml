@@ -33,11 +33,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
-          toolchain: stable
+          toolchain: 1.91.0
       - name: Test release helper
         run: python3 .github/scripts/test_release.py
-      - name: Check release plan
-        run: python3 .github/scripts/release.py plan
+      - name: Test workspace publish
+        run: cargo publish --workspace --dry-run # zizmor: ignore[use-trusted-publishing] dry-run does not authenticate
 
   publish:
     name: publish crates
@@ -66,10 +66,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
-          toolchain: stable
+          toolchain: 1.91.0
       - name: Validate release
         run: >-
-          python3 .github/scripts/release.py check
+          python3 .github/scripts/release.py
           --tag "${GITHUB_REF_NAME}"
           --commit "${GITHUB_SHA}"
       - name: Authenticate with crates.io
@@ -78,7 +78,7 @@ jobs:
       - name: Publish crates
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: python3 .github/scripts/release.py publish --tag "${GITHUB_REF_NAME}"
+        run: cargo publish --workspace
 
   github-release:
     name: create GitHub release
