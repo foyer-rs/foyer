@@ -8,8 +8,8 @@ on:
     branches:
       - main
     paths:
-      - ".github/scripts/release.py"
-      - ".github/scripts/test_release.py"
+      - ".github/scripts/release.sh"
+      - ".github/scripts/test_release.sh"
       - ".github/workflows/release.yml"
       - "**/Cargo.toml"
   workflow_dispatch:
@@ -26,16 +26,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: 1.91.0
       - name: Test release helper
-        run: python3 .github/scripts/test_release.py
+        run: bash .github/scripts/test_release.sh
       - name: Test workspace publish
         run: cargo publish --workspace --dry-run # zizmor: ignore[use-trusted-publishing] dry-run does not authenticate
 
@@ -59,19 +55,15 @@ jobs:
           persist-credentials: false
       - name: Fetch main
         run: git fetch --no-tags origin main:refs/remotes/origin/main
-      - name: Install Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: 1.91.0
       - name: Validate release
         run: >-
-          python3 .github/scripts/release.py
-          --tag "${GITHUB_REF_NAME}"
-          --commit "${GITHUB_SHA}"
+          bash .github/scripts/release.sh
+          "${GITHUB_REF_NAME}"
+          "${GITHUB_SHA}"
       - name: Authenticate with crates.io
         id: auth
         uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18
