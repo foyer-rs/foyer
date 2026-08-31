@@ -14,13 +14,13 @@
 
 use std::sync::Arc;
 
+use asyncband::mutex::Mutex;
 use bytes::{Buf, BufMut};
 use foyer_common::error::Result;
-use mea::mutex::Mutex;
 
 use crate::{
-    io::{bytes::IoSliceMut, device::Partition, PAGE},
     IoEngine,
+    io::{PAGE, bytes::IoSliceMut, device::Partition},
 };
 
 #[derive(Debug, Clone)]
@@ -30,9 +30,7 @@ pub struct Tombstone {
 }
 
 impl Tombstone {
-    const fn serialized_len() -> usize {
-        8 + 8
-    }
+    const SERIALIZED_LEN: usize = size_of::<u64>() + size_of::<u64>();
 
     fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(self.hash);
@@ -59,7 +57,7 @@ struct TombstoneLogInner {
 }
 
 impl TombstoneLog {
-    pub const SLOTS_PER_PAGE: usize = PAGE / Tombstone::serialized_len();
+    pub const SLOTS_PER_PAGE: usize = PAGE / Tombstone::SERIALIZED_LEN;
 
     /// Open the tombstone log with given a dedicated device.
     ///
@@ -81,11 +79,11 @@ impl TombstoneLog {
                 let mut seq = 0;
                 let mut addr = 0;
 
-                for (slot, buf) in buffer.chunks_exact(Tombstone::serialized_len()).enumerate() {
+                for (slot, buf) in buffer.chunks_exact(Tombstone::SERIALIZED_LEN).enumerate() {
                     let tombstone = Tombstone::read(buf);
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
-                        addr = slot * Tombstone::serialized_len();
+                        addr = slot * Tombstone::SERIALIZED_LEN;
                     }
                     if tombstone.sequence == 0 {
                         continue;
@@ -110,11 +108,11 @@ impl TombstoneLog {
 
         let latest_tombstone_page = latest_tombstone_offset / PAGE;
         let latest_tombstone_slot = if latest_tombstone_page == 0 {
-            latest_tombstone_offset / Tombstone::serialized_len()
+            latest_tombstone_offset / Tombstone::SERIALIZED_LEN
         } else {
             let pages_before_latest_tombstone = latest_tombstone_page - 1;
             Self::SLOTS_PER_PAGE * pages_before_latest_tombstone
-                + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::serialized_len()
+                + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::SERIALIZED_LEN
         };
 
         let pages = partitions.iter().map(|p| p.size()).sum::<usize>() / PAGE;
@@ -131,7 +129,7 @@ impl TombstoneLog {
     fn calculate_slot_addr(pages: usize, slot: usize) -> (u32, usize) {
         let page = slot / Self::SLOTS_PER_PAGE;
         let page = page % pages;
-        let offset = (slot % Self::SLOTS_PER_PAGE) * Tombstone::serialized_len();
+        let offset = (slot % Self::SLOTS_PER_PAGE) * Tombstone::SERIALIZED_LEN;
         (page as u32, offset)
     }
 
@@ -151,7 +149,7 @@ impl TombstoneLog {
                 inner.buffer.load(page).await?;
             }
             let start = offset;
-            let end = start + Tombstone::serialized_len();
+            let end = start + Tombstone::SERIALIZED_LEN;
             tombstone.write(&mut inner.buffer.as_mut()[start..end]);
 
             inner.slot += 1;
@@ -252,11 +250,11 @@ mod tests {
 
     use super::*;
     use crate::{
+        IoEngineConfig, PsyncIoEngineConfig,
         io::{
-            device::{fs::FsDeviceBuilder, DeviceBuilder},
+            device::{DeviceBuilder, fs::FsDeviceBuilder},
             engine::IoEngineBuildContext,
         },
-        IoEngineConfig, PsyncIoEngineConfig,
     };
 
     #[test_log::test(tokio::test)]

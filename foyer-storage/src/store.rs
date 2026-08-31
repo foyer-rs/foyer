@@ -31,21 +31,21 @@ use foyer_common::{
 };
 use foyer_memory::{Cache, Piece};
 
-#[cfg(feature = "test_utils")]
+#[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
+    StorageFilterResult,
     compress::Compression,
     engine::{
-        noop::{NoopEngine, NoopEngineConfig},
         Engine, EngineBuildContext, EngineConfig, Load, Populated, RecoverMode,
+        noop::{NoopEngine, NoopEngineConfig},
     },
     io::{
-        device::{statistics::Statistics, throttle::Throttle, Device},
-        engine::{monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig, IoEngineBuildContext, IoEngineConfig},
+        device::{Device, statistics::Statistics, throttle::Throttle},
+        engine::{IoEngineBuildContext, IoEngineConfig, monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig},
     },
     keeper::Keeper,
     serde::EntrySerializer,
-    StorageFilterResult,
 };
 
 /// The disk cache engine that serves as the storage backend of `foyer`.
@@ -147,6 +147,8 @@ where
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
+        } else {
+            self.delete(piece.key());
         }
 
         self.inner.metrics.storage_enqueue.increase(1);
@@ -208,7 +210,16 @@ where
                     .record(now.elapsed().as_secs_f64());
                 Ok(Load::Piece { piece, populated })
             }
-            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) | Ok(Load::Miss) => {
+            Ok(Load::Entry { .. }) | Ok(Load::Piece { .. }) => {
+                self.inner.metrics.storage_miss.increase(1);
+                self.inner.metrics.storage_false_positive.increase(1);
+                self.inner
+                    .metrics
+                    .storage_miss_duration
+                    .record(now.elapsed().as_secs_f64());
+                Ok(Load::Miss)
+            }
+            Ok(Load::Miss) => {
                 self.inner.metrics.storage_miss.increase(1);
                 self.inner
                     .metrics
@@ -445,7 +456,9 @@ where
         let io_engine_builder = match self.io_engine_config {
             Some(builder) => builder,
             None => {
-                tracing::info!("[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default.");
+                tracing::info!(
+                    "[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default."
+                );
                 PsyncIoEngineConfig::new().boxed()
             }
         };
@@ -504,9 +517,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        DeviceBuilder,
         engine::block::engine::BlockEngineConfig,
         io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineConfig},
-        DeviceBuilder,
     };
 
     #[tokio::test]
@@ -569,5 +582,50 @@ mod tests {
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
         assert_eq!(l2.entry().unwrap().1, "bar");
+    }
+
+    #[tokio::test]
+    async fn test_store_enqueue_admission_reject_update() {
+        use crate::filter::StorageFilter;
+
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        let switch = Switch::default();
+        switch.on();
+        let filter = StorageFilter::new().with_condition(switch.clone());
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_admission_filter(filter),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), false);
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Entry { ref value, .. } if value == b"v1"));
+
+        switch.off();
+
+        let e2 = memory.insert(1, b"v2".to_vec());
+        store.enqueue(e2.piece(), false);
+        store.wait().await;
+
+        let l2 = store.load(&1).await.unwrap();
+        assert!(matches!(l2, Load::Miss));
     }
 }

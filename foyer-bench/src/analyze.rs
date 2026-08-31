@@ -28,8 +28,8 @@
 
 use std::{
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -37,7 +37,6 @@ use std::{
 use bytesize::ByteSize;
 use foyer::Statistics;
 use hdrhistogram::Histogram;
-use mea::broadcast;
 use parking_lot::RwLock;
 
 // latencies are measured by 'us'
@@ -315,7 +314,7 @@ pub async fn monitor(
     total_secs: Duration,
     warm_up: Duration,
     metrics: Metrics,
-    mut stop: broadcast::overflow::Receiver<()>,
+    stop: Arc<AtomicBool>,
 ) {
     let start = Instant::now();
 
@@ -334,9 +333,8 @@ pub async fn monitor(
 
     loop {
         let now = Instant::now();
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
 
         tokio::time::sleep(interval).await;

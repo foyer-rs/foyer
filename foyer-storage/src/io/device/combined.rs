@@ -17,8 +17,8 @@ use std::sync::{Arc, RwLock};
 use foyer_common::error::{Error, ErrorKind, Result};
 
 use crate::{
-    io::device::{Device, DeviceBuilder, Partition, PartitionId},
     RawFile, Statistics, Throttle,
+    io::device::{Device, DeviceBuilder, Partition, PartitionId},
 };
 
 /// Builder for a combined device that wraps multiple devices and allows access to their blocks.

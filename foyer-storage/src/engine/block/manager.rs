@@ -17,11 +17,12 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, RwLock, RwLockWriteGuard,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
+use asyncband::oneshot;
 use foyer_common::{
     error::{ErrorKind, Result},
     metrics::Metrics,
@@ -29,14 +30,14 @@ use foyer_common::{
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{ready, Shared},
     FutureExt,
+    future::{Shared, ready},
 };
 use itertools::Itertools;
-use mea::oneshot;
 use rand::seq::IteratorRandom;
 
 use crate::{
+    Device,
     engine::block::{
         eviction::{EvictionInfo, EvictionPicker},
         reclaimer::ReclaimerTrait,
@@ -46,7 +47,6 @@ use crate::{
         device::Partition,
         engine::IoEngine,
     },
-    Device,
 };
 
 pub type BlockId = u32;
@@ -372,24 +372,23 @@ impl BlockManager {
         }
     }
 
-    fn reclaim_if_needed<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) {
+    fn reclaim_if_needed(&self, state: &mut RwLockWriteGuard<'_, State>) {
         if state.clean_blocks.len() < self.inner.clean_block_threshold
             && state.reclaiming_blocks.len() < self.inner.reclaim_concurrency
+            && let Some(block) = self.evict(state)
         {
-            if let Some(block) = self.evict(state) {
-                state.reclaiming_blocks.insert(block.id());
-                self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
-                let block = ReclaimingBlock {
-                    block_manager: self.clone(),
-                    block,
-                };
-                let future = self.inner.reclaimer.reclaim(block);
-                self.inner.spawner.spawn(future);
-            }
+            state.reclaiming_blocks.insert(block.id());
+            self.inner.metrics.storage_block_engine_block_reclaiming.increase(1);
+            let block = ReclaimingBlock {
+                block_manager: self.clone(),
+                block,
+            };
+            let future = self.inner.reclaimer.reclaim(block);
+            self.inner.spawner.spawn(future);
         }
     }
 
-    fn evict<'a>(&self, state: &mut RwLockWriteGuard<'a, State>) -> Option<Block> {
+    fn evict(&self, state: &mut RwLockWriteGuard<'_, State>) -> Option<Block> {
         let mut picked = None;
 
         if state.evictable_blocks.is_empty() {

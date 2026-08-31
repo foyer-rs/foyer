@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     fmt::Debug,
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering},
     time::Instant,
 };
 
@@ -24,11 +24,12 @@ use foyer_common::{
     metrics::Metrics,
     spawn::Spawner,
 };
-use futures_util::{stream, StreamExt, TryStreamExt};
+use futures_util::{StreamExt, TryStreamExt, stream};
 use itertools::Itertools;
 
 use super::indexer::{EntryAddress, Indexer};
 use crate::engine::{
+    RecoverMode,
     block::{
         indexer::HashedEntryAddress,
         manager::{Block, BlockId, BlockManager},
@@ -36,7 +37,6 @@ use crate::engine::{
         serde::{AtomicSequence, Sequence},
         tombstone::Tombstone,
     },
-    RecoverMode,
 };
 
 #[derive(Debug)]

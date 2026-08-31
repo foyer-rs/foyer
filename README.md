@@ -3,20 +3,12 @@
 </p>
 
 <p align="center">
-    <a href="https://foyer-rs.github.io/foyer">
-        <img src="https://img.shields.io/website?url=https%3A%2F%2Ffoyer-rs.github.io/foyer&up_message=foyer-rs.github.io/foyer&down_message=website&style=for-the-badge&logo=htmx" alt="docs.rs" />
-    </a>
     <a href="https://crates.io/crates/foyer">
         <img src="https://img.shields.io/crates/v/foyer?style=for-the-badge&logo=crates.io&labelColor=555555" alt="crates.io" />
     </a>
     <a href="https://docs.rs/foyer">
         <img src="https://img.shields.io/docsrs/foyer?style=for-the-badge&logo=rust&label=docs.rs&labelColor=555555" alt="docs.rs" />
     </a>
-</p>
-
-<p align="center">
-    <b>Tutorial & Document:</b>
-    <a href="https://foyer-rs.github.io/foyer"><b>https://foyer-rs.github.io/foyer</b></a>
 </p>
 
 # foyer
@@ -33,10 +25,6 @@ foyer draws inspiration from [Facebook/CacheLib](https://github.com/facebook/cac
 
 However, *foyer* is more than just a *rewrite in Rust* effort; it introduces a variety of new and optimized features.
 
-For more details, please visit foyer's website: <https://foyer-rs.github.io/foyer> 🥰
-
-[Website](https://foyer-rs.github.io/foyer) |
-[Tutorial](https://foyer-rs.github.io/foyer/docs/overview) |
 [API Docs](https://docs.rs/foyer) |
 [Crate](https://crates.io/crates/foyer)
 
@@ -69,18 +57,16 @@ Feel free to open a PR and add your projects here:
 
 ## Quick Start
 
-**This section only shows briefs. Please visit <https://foyer-rs.github.io/foyer> for more details.**
-
 To use *foyer* in your project, add this line to the `dependencies` section of `Cargo.toml`.
 
 ```toml
-foyer = "0.21"
+foyer = "0.22"
 ```
 
 If your project is using the nightly rust toolchain, the `nightly` feature needs to be enabled.
 
 ```toml
-foyer = { version = "0.21", features = ["nightly"] }
+foyer = { version = "0.22", features = ["nightly"] }
 ```
 
 ### Out-of-the-box In-memory Cache
@@ -252,15 +238,9 @@ foyer = { version = "*", features = ["serde"] }
 
 More code examples and details can be found [here](https://github.com/foyer-rs/foyer/tree/main/examples).
 
-Case study of real-world usage in the production system can be found in [Document - Case Study - RisingWave](https://foyer-rs.github.io/foyer/docs/case-study/risingwave)
-
-## Architecture
-
-The architecture of ***foyer*** is still not mature and is undergoing rapid iteration. Currently, the architectural design can refer to [Document - Architecture](https://foyer-rs.github.io/foyer/docs/design/architecture)
-
 ## Supported Rust Versions
 
-*foyer* is built against the recent stable release. The minimum supported version is 1.85.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
+*foyer* is built against the recent stable release. The minimum supported version is 1.91.0. The current *foyer* version is not guaranteed to build on Rust versions earlier than the minimum supported version.
 
 ## Supported Platforms
 
@@ -287,12 +267,4 @@ Don't forget to pass `cargo x --fast` (which runs most necessary checks and test
 
 If you want to run a broader range of checks locally, run `cargo x`. 🙌
 
-Thank you for your contribution~ <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />
-
-<!-- rustdoc-ignore-start -->
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=foyer-rs/foyer&type=Date)](https://www.star-history.com/#foyer-rs/foyer&Date)
-
-<!-- rustdoc-ignore-end -->
+Thank you for your contribution <img src="https://raw.githubusercontent.com/foyer-rs/foyer/main/etc/logo/ferris.min.svg" height="24px" />

@@ -12,11 +12,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.22.3"
-edition = "2021"
-rust-version = "1.85.0"
+version = "0.22.4"
+edition = "2024"
+rust-version = "1.91.0"
 repository = "https://github.com/foyer-rs/foyer"
-homepage = "https://foyer-rs.github.io/foyer"
+homepage = "https://github.com/foyer-rs/foyer"
 keywords = ["cache", "hybrid"]
 authors = ["MrCroxx <mrcroxx@outlook.com>"]
 license = "Apache-2.0"
@@ -32,25 +32,24 @@ bytes = "1"
 bytesize = { package = "foyer-bytesize", version = "2" }
 cfg-if = "1"
 clap = { version = "4", features = ["derive"] }
-cmsketch = "0.2"
 colored = "3"
 console-subscriber = "0.5"
 core_affinity = "0.8"
-criterion = "0.7"
+criterion = "0.8.2"
 csv = "1"
+datasketches = { version = "0.3.0", default-features = false }
 equivalent = "1"
-fastant = "0.1.11"
-fastrace = "0.7"
-fastrace-jaeger = "0.7"
-fastrace-opentelemetry = "0.15"
-foyer = { version = "0.22.3", path = "foyer", default-features = false }
-foyer-common = { version = "0.22.3", path = "foyer-common", default-features = false }
-foyer-memory = { version = "0.22.3", path = "foyer-memory", default-features = false }
-foyer-storage = { version = "0.22.3", path = "foyer-storage", default-features = false }
+fastant = { version = "0.1.11" }
+fastrace = { version = "0.7.18" }
+fastrace-opentelemetry = { version = "0.18.1" }
+foyer = { version = "0.22.4", path = "foyer", default-features = false }
+foyer-common = { version = "0.22.4", path = "foyer-common", default-features = false }
+foyer-memory = { version = "0.22.4", path = "foyer-memory", default-features = false }
+foyer-storage = { version = "0.22.4", path = "foyer-storage", default-features = false }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-hashbrown = "0.16"
+hashbrown = { version = "0.17.1" }
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
@@ -58,24 +57,24 @@ hyper = { version = "1", default-features = false }
 hyper-util = { version = "0.1", default-features = false }
 intrusive-collections = { package = "foyer-intrusive-collections", version = "0.10.0-dev" }
 io-uring = "0.7"
-itertools = "0.14"
+itertools = { version = "0.15.0" }
 jiff = { version = "0.2.16" }
 libc = "0.2"
 lz4 = "1"
-mea = "0.6"
+asyncband = "0.6.7"
 mixtrics = "0.2"
 moka = "0.12"
-opentelemetry = "0.31"
-opentelemetry-otlp = "0.31"
-opentelemetry_sdk = "0.31"
+opentelemetry = { version = "0.32.0" }
+opentelemetry-otlp = { version = "0.32.0" }
+opentelemetry_sdk = { version = "0.32.1" }
 parking_lot = { version = "0.12" }
 paste = "1"
 pin-project = "1"
 prometheus = "0.14"
-rand = { version = "0.9" }
-rand_distr = { version = "0.5" }
+rand = { version = "0.10.0", default-features = false }
+rand_distr = { version = "0.6.0" }
 # Enable all features by default to make it possible to opt-out madsim dependency. 
-# FYI: https://github.com/rust-lang/cargo/issues/10801
+# See why we need this at https://github.com/rust-lang/cargo/issues/10801
 runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
   "full",
 ] }
@@ -86,10 +85,13 @@ serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
-tokio = { package = "foyer-tokio", version = "0.22.3", path = "foyer-tokio", default-features = false }
+tokio = { package = "foyer-tokio", version = "0.22.4", path = "foyer-tokio", default-features = false }
+# tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
+# Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
+tonic = { version = "0.14.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
-twox-hash = "2"
+twox-hash = { version = "2.1.2", default-features = false }
 zstd = "0.13"
 
 [workspace.lints.rust]
@@ -98,6 +100,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
 
 [workspace.lints.clippy]
 allow_attributes = "warn"
+# TODO: const generic cannot use associated constraints now
+chunks_exact_to_as_chunks = "allow"
 
 [profile.release]
 debug = "full"

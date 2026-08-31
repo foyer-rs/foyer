@@ -18,8 +18,8 @@ use std::{
     collections::VecDeque,
     fmt::Display,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -28,7 +28,7 @@ use foyer::{
     BlockEngineConfig, DeviceBuilder, Error, Event, EventListener, FsDeviceBuilder, HybridCache, HybridCacheBuilder,
     HybridCachePolicy, HybridCacheProperties, Location, PsyncIoEngineConfig,
 };
-use rand::{rng, Rng};
+use rand::{RngExt, rng};
 
 const KB: usize = 1024;
 const MB: usize = 1024 * KB;
@@ -159,7 +159,7 @@ async fn write(hybrid: HybridCache<u64, Vec<u8>>, _: Arc<RecentEvictionQueue>, i
         if key > WRITES as u64 {
             break;
         }
-        if key % INTERVAL as u64 == 0 {
+        if key.is_multiple_of(INTERVAL as u64) {
             tracing::info!("Inserted {key} items");
         }
         for k in key.saturating_sub(DUPLICATES as u64)..=key {

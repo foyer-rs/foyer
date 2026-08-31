@@ -15,15 +15,19 @@
 use std::{
     collections::VecDeque,
     fmt::Debug,
-    future::{poll_fn, Future},
+    future::{Future, poll_fn},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
-    task::{ready, Poll},
+    task::{Poll, ready},
     time::Instant,
 };
 
+use asyncband::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use foyer_common::{
     bits,
     code::{StorageKey, StorageValue},
@@ -34,18 +38,15 @@ use foyer_common::{
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{try_join, try_join_all},
     FutureExt,
+    future::{try_join, try_join_all},
 };
 use itertools::Itertools;
-use mea::{
-    mpsc::{UnboundedReceiver, UnboundedSender},
-    oneshot,
-};
 
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
+    Compression,
     engine::block::{
         buffer::{Batch, BlobPart, Block, Buffer, SplitCtx, Splitter},
         indexer::{EntryAddress, HashedEntryAddress, Indexer},
@@ -55,11 +56,10 @@ use crate::{
         tombstone::{Tombstone, TombstoneLog},
     },
     io::{
-        bytes::{IoSlice, IoSliceMut},
         PAGE,
+        bytes::{IoSlice, IoSliceMut},
     },
     keeper::PieceRef,
-    Compression,
 };
 
 pub enum Submission<K, V, P>
@@ -157,7 +157,7 @@ where
         submit_queue_size: Arc<AtomicUsize>,
         metrics: Arc<Metrics>,
     ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
-        let (tx, rx) = mea::mpsc::unbounded();
+        let (tx, rx) = asyncband::mpsc::unbounded();
         let this = Self {
             id,
             tx,
@@ -616,10 +616,9 @@ where
             }
         };
 
-        let f: BoxFuture<'_, Result<(Vec<GetCleanBlockHandle>, ())>> = try_join(try_join_all(futures), future).boxed();
         let handle = self
             .spawner
-            .spawn(f)
+            .spawn(Box::pin(try_join(try_join_all(futures), future)))
             .map(move |jres| match jres {
                 Ok(Ok((mut states, ()))) => IoTaskCtx {
                     handle: states.pop(),
@@ -651,10 +650,9 @@ where
                         tombstone_infos,
                     }
                 }
-            })
-            .boxed();
+            });
 
-        handle
+        Box::pin(handle)
     }
 
     fn handle_io_complete(

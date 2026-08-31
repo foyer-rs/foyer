@@ -16,7 +16,7 @@ use std::sync::{Arc, RwLock};
 
 use foyer_common::error::{Error, Result};
 
-use crate::io::device::{statistics::Statistics, Device, DeviceBuilder, Partition, PartitionId};
+use crate::io::device::{Device, DeviceBuilder, Partition, PartitionId, statistics::Statistics};
 
 /// Builder for a partial device that wraps another device and allows access to only a subset of capacity.
 #[derive(Debug)]

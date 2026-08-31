@@ -118,8 +118,8 @@ pub trait RangeBoundsExt<
 }
 
 impl<
-        T: PartialOrd<T> + Add<Output = T> + Sub<Output = T> + Clone + Copy + Send + Sync + 'static + ZeroOne,
-        RB: RangeBounds<T>,
-    > RangeBoundsExt<T> for RB
+    T: PartialOrd<T> + Add<Output = T> + Sub<Output = T> + Clone + Copy + Send + Sync + 'static + ZeroOne,
+    RB: RangeBounds<T>,
+> RangeBoundsExt<T> for RB
 {
 }

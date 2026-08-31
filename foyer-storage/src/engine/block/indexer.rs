@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     sync::Arc,
 };
 
@@ -144,10 +144,10 @@ impl Indexer {
             for (hash, sequence) in hashes {
                 match shard.entry(hash) {
                     Entry::Occupied(o) => {
-                        if sequence >= o.get().sequence() {
-                            if let Some(addr) = self.extract_address(o.remove()) {
-                                olds.push(addr);
-                            }
+                        if sequence >= o.get().sequence()
+                            && let Some(addr) = self.extract_address(o.remove())
+                        {
+                            olds.push(addr);
                         }
                     }
                     Entry::Vacant(_) => {}

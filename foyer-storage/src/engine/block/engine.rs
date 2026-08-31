@@ -17,12 +17,13 @@ use std::{
     future::Future,
     marker::PhantomData,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Instant,
 };
 
+use asyncband::mpsc::UnboundedReceiver;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
 use foyer_common::{
@@ -35,11 +36,10 @@ use foyer_common::{
 };
 use futures_core::future::BoxFuture;
 use futures_util::{
-    future::{join_all, try_join_all},
     FutureExt,
+    future::{join_all, try_join_all},
 };
 use itertools::Itertools;
-use mea::mpsc::UnboundedReceiver;
 
 use super::{
     flusher::{Flusher, InvalidStats, Submission},
@@ -49,8 +49,10 @@ use super::{
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
+    Device, Load, RejectAll, StorageFilter, StorageFilterResult,
     compress::Compression,
     engine::{
+        Engine, EngineBuildContext, EngineConfig, Populated,
         block::{
             eviction::{EvictionPicker, FifoPicker, InvalidRatioPicker},
             manager::{BlockId, BlockManager},
@@ -58,13 +60,11 @@ use crate::{
             serde::{AtomicSequence, EntryHeader},
             tombstone::{Tombstone, TombstoneLog},
         },
-        Engine, EngineBuildContext, EngineConfig, Populated,
     },
     filter::conditions::IoThrottle,
-    io::{bytes::IoSliceMut, PAGE},
+    io::{PAGE, bytes::IoSliceMut},
     keeper::PieceRef,
     serde::EntryDeserializer,
-    Device, Load, RejectAll, StorageFilter, StorageFilterResult,
 };
 
 /// Config for the block-based disk cache engine.
@@ -341,10 +341,10 @@ where
 
             let max_entries = device.capacity() / PAGE;
             let pages = max_entries / TombstoneLog::SLOTS_PER_PAGE
-                + if max_entries % TombstoneLog::SLOTS_PER_PAGE > 0 {
-                    1
-                } else {
+                + if max_entries.is_multiple_of(TombstoneLog::SLOTS_PER_PAGE) {
                     0
+                } else {
+                    1
                 };
             let partition = device.create_partition(pages * PAGE)?;
             partitions.push(partition);
@@ -387,10 +387,11 @@ where
         let blocks = block_manager.blocks();
 
         if self.flushers + self.clean_block_threshold > blocks / 2 {
-            tracing::warn!("[block engine]: block-based object disk cache stable blocks count is too small, flusher [{flushers}] + clean block threshold [{clean_block_threshold}] (default = reclaimers) is supposed to be much larger than the block count [{blocks}]",
-                    flushers = self.flushers,
-                    clean_block_threshold = self.clean_block_threshold,
-                );
+            tracing::warn!(
+                "[block engine]: block-based object disk cache stable blocks count is too small, flusher [{flushers}] + clean block threshold [{clean_block_threshold}] (default = reclaimers) is supposed to be much larger than the block count [{blocks}]",
+                flushers = self.flushers,
+                clean_block_threshold = self.clean_block_threshold,
+            );
         }
 
         let sequence = AtomicSequence::default();
@@ -410,7 +411,7 @@ where
         .await?;
 
         let io_buffer_size = self.buffer_pool_size / self.flushers;
-        for (flusher, rx) in flushers.iter().zip(rxs.into_iter()) {
+        for (flusher, rx) in flushers.iter().zip(rxs) {
             flusher.run(
                 rx,
                 block_size,
@@ -492,7 +493,7 @@ where
     P: Properties,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GenericStore").finish()
+        f.debug_struct("BlockEngine").finish()
     }
 }
 
@@ -567,7 +568,7 @@ where
         .boxed()
     }
 
-    #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::generic::enqueue"))]
+    #[cfg_attr(feature = "tracing", trace(name = "foyer::storage::engine::block::engine::enqueue"))]
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize) {
         if !self.inner.active.load(Ordering::Relaxed) {
             tracing::warn!("cannot enqueue new entry after closed");
@@ -661,7 +662,7 @@ where
                             tracing::error!(hash, ?addr, ?e, "[block engine load]: load error");
                             Err(e)
                         }
-                    }
+                    };
                 }
             };
 
@@ -679,12 +680,12 @@ where
                         return match e.kind() {
                             ErrorKind::MagicMismatch | ErrorKind::ChecksumMismatch | ErrorKind::OutOfRange => {
                                 tracing::warn!(
-                                hash,
-                                ?addr,
-                                ?header,
-                                ?e,
-                                "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
-                            );
+                                    hash,
+                                    ?addr,
+                                    ?header,
+                                    ?e,
+                                    "[block engine load]: deserialize read buffer raise error, remove this entry and skip"
+                                );
                                 indexer.remove(hash);
                                 Ok(Load::Miss)
                             }
@@ -692,7 +693,7 @@ where
                                 tracing::error!(hash, ?addr, ?header, ?e, "[block engine load]: load error");
                                 Err(e)
                             }
-                        }
+                        };
                     }
                 };
                 metrics
@@ -714,7 +715,7 @@ where
         };
         #[cfg(feature = "tracing")]
         let load = load.in_span(Span::enter_with_local_parent(
-            "foyer::storage::engine::block::generic::load",
+            "foyer::storage::engine::block::engine::load",
         ));
         load
     }
@@ -855,14 +856,14 @@ mod tests {
 
     use super::*;
     use crate::{
+        PsyncIoEngineConfig, RejectAll,
         engine::RecoverMode,
         io::{
-            device::{combined::CombinedDeviceBuilder, fs::FsDeviceBuilder, DeviceBuilder},
+            device::{DeviceBuilder, combined::CombinedDeviceBuilder, fs::FsDeviceBuilder},
             engine::{IoEngine, IoEngineBuildContext, IoEngineConfig},
         },
         serde::EntrySerializer,
         test_utils::Biased,
-        PsyncIoEngineConfig, RejectAll,
     };
 
     const KB: usize = 1024;

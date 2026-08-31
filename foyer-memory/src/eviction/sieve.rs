@@ -15,8 +15,8 @@
 use std::{
     mem::offset_of,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
 };
 
@@ -25,12 +25,13 @@ use foyer_common::{
     error::Result,
     properties::Properties,
 };
-use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListAtomicLink};
+use intrusive_collections::{LinkedList, LinkedListAtomicLink, intrusive_adapter};
 use serde::{Deserialize, Serialize};
 
 use super::{Eviction, Op};
 use crate::record::Record;
 
+/// Sieve eviction algorithm config.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SieveConfig;
 
@@ -121,7 +122,8 @@ where
         };
 
         loop {
-            if let Some(record) = candidate.get() {
+            {
+                let record = candidate.get()?;
                 let state = unsafe { &*record.state().get() };
                 if !state.is_visited() {
                     break;
@@ -133,9 +135,6 @@ where
                         candidate.move_next();
                     }
                 }
-            } else {
-                // Queue is empty, no record to evict
-                return None;
             }
         }
 
@@ -144,11 +143,11 @@ where
     }
 
     fn remove(&mut self, record: &Arc<Record<Self>>) {
-        if let Some(ref hand_ptr) = self.hand {
-            if Arc::ptr_eq(hand_ptr, record) {
-                // Reset hand if we are removing the current hand pointer
-                self.hand = None;
-            }
+        if let Some(ref hand_ptr) = self.hand
+            && Arc::ptr_eq(hand_ptr, record)
+        {
+            // Reset hand if we are removing the current hand pointer
+            self.hand = None;
         }
 
         unsafe { self.queue.remove_from_ptr(Arc::as_ptr(record)) };
@@ -173,7 +172,7 @@ pub mod tests {
 
     use super::*;
     use crate::{
-        eviction::test_utils::{assert_ptr_eq, assert_ptr_vec_eq, Dump, OpExt, TestProperties},
+        eviction::test_utils::{Dump, OpExt, TestProperties, assert_ptr_eq, assert_ptr_vec_eq},
         record::Data,
     };
 

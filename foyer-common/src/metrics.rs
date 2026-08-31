@@ -40,6 +40,7 @@ pub struct Metrics {
     pub storage_throttled: BoxedCounter,
     pub storage_delete: BoxedCounter,
     pub storage_error: BoxedCounter,
+    pub storage_false_positive: BoxedCounter,
 
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
@@ -230,6 +231,7 @@ impl Metrics {
         let storage_delete = foyer_storage_op_total.counter(&[name.clone(), "delete".into()]);
         let storage_throttled = foyer_storage_op_total.counter(&[name.clone(), "throttled".into()]);
         let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
+        let storage_false_positive = foyer_storage_op_total.counter(&[name.clone(), "false_positive".into()]);
 
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
@@ -329,6 +331,7 @@ impl Metrics {
             storage_throttled,
             storage_delete,
             storage_error,
+            storage_false_positive,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,

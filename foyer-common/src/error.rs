@@ -47,12 +47,14 @@ pub enum ErrorKind {
     MagicMismatch,
     /// Out of range.
     OutOfRange,
-    /// No sapce.
+    /// No space.
     NoSpace,
     /// Closed.
     Closed,
     /// Recover error.
     Recover,
+    /// Unsupported operation.
+    Unsupported,
 }
 
 impl ErrorKind {
@@ -85,6 +87,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::NoSpace => "No space",
             ErrorKind::Closed => "Closed",
             ErrorKind::Recover => "Recover error",
+            ErrorKind::Unsupported => "Unsupported operation",
         }
     }
 }

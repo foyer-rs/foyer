@@ -14,25 +14,25 @@
 
 use std::{
     fmt::Debug,
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
 };
 
+use asyncband::oneshot;
 use core_affinity::CoreId;
 #[cfg(feature = "tracing")]
 use fastrace::prelude::*;
 use foyer_common::error::{Error, ErrorKind, Result};
 use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
-use io_uring::{opcode, types::Fd, IoUring};
-use mea::oneshot;
+use io_uring::{IoUring, opcode, types::Fd};
 
 use crate::{
+    RawFile,
     io::{
         bytes::{IoB, IoBuf, IoBufMut},
         device::Partition,
         engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle},
     },
-    RawFile,
 };
 
 /// Config for io_uring based I/O engine.
@@ -199,7 +199,7 @@ impl IoEngineConfig for UringIoEngineConfig {
                 })
                 .unzip();
 
-            for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs.into_iter()).enumerate() {
+            for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs).enumerate() {
                 let mut builder = IoUring::builder();
                 if self.iopoll {
                     builder.setup_iopoll();

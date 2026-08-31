@@ -18,11 +18,11 @@ use anyhow::Ok;
 use foyer::{Cache, CacheBuilder};
 use http_body_util::Full;
 use hyper::{
+    Request, Response,
     body::{Bytes, Incoming},
     header::CONTENT_TYPE,
     server::conn::http1,
     service::Service,
-    Request, Response,
 };
 use hyper_util::rt::TokioIo;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -106,7 +106,7 @@ async fn main() {
         .with_metrics_registry(Box::new(PrometheusMetricsRegistry::new(registry)))
         .build();
 
-    // > curl http://127.0.0.1:7890
+    // > curl http://127.0.0.1:19970
     //
     // # HELP foyer_hybrid_op_duration foyer hybrid cache operation durations
     // # TYPE foyer_hybrid_op_duration histogram

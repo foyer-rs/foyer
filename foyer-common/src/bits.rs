@@ -48,18 +48,18 @@ pub trait Unsigned:
 }
 
 impl<
-        U: Add<Output = Self>
-            + Sub<Output = Self>
-            + BitAnd<Output = Self>
-            + Not<Output = Self>
-            + Sized
-            + From<u8>
-            + Eq
-            + Debug
-            + Display
-            + Clone
-            + Copy,
-    > Unsigned for U
+    U: Add<Output = Self>
+        + Sub<Output = Self>
+        + BitAnd<Output = Self>
+        + Not<Output = Self>
+        + Sized
+        + From<u8>
+        + Eq
+        + Debug
+        + Display
+        + Clone
+        + Copy,
+> Unsigned for U
 {
 }
 

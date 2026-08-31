@@ -30,12 +30,12 @@ use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
+    RawFile,
     io::{
         bytes::{IoB, IoBuf, IoBufMut, Raw},
         device::Partition,
         engine::{IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle},
     },
-    RawFile,
 };
 
 #[derive(Debug)]

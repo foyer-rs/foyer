@@ -15,7 +15,7 @@
 use bytes::Bytes;
 use criterion::Criterion;
 
-use super::{decode, encode, K, M};
+use super::{K, M, decode, encode};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct VecU8ValueSerde(Vec<u8>);

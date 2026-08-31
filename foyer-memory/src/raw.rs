@@ -20,8 +20,8 @@ use std::{
     ops::Deref,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll},
 };
@@ -43,15 +43,15 @@ use parking_lot::{Mutex, RwLock};
 use pin_project::{pin_project, pinned_drop};
 
 use crate::{
+    Piece,
     eviction::{Eviction, Op},
-    indexer::{sentry::Sentry, Indexer},
+    indexer::{Indexer, hash_table::HashTableIndexer, sentry::Sentry},
     inflight::{
         Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
         RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::{ArcPipe, NoopPipe},
     record::{Data, Record},
-    Piece,
 };
 
 /// The weighter for the in-memory cache.
@@ -360,6 +360,42 @@ where
     }
 }
 
+impl<E, S> RawCacheShard<E, S, HashTableIndexer<E>>
+where
+    E: Eviction,
+    S: HashBuilder,
+{
+    fn evict_if<F>(&mut self, predicate: &mut F, garbages: &mut Vec<(Event, Arc<Record<E>>)>)
+    where
+        F: FnMut(&E::Key, &E::Value) -> bool + ?Sized,
+    {
+        let Self {
+            eviction,
+            indexer,
+            usage,
+            entries,
+            metrics,
+            ..
+        } = self;
+
+        for record in indexer.extract_if(|record| predicate(record.key(), record.value())) {
+            if record.is_in_eviction() {
+                eviction.remove(&record);
+            }
+            strict_assert!(!record.is_in_indexer());
+            strict_assert!(!record.is_in_eviction());
+
+            *usage -= record.weight();
+            *entries -= 1;
+            metrics.memory_evict.increase(1);
+            metrics.memory_usage.decrease(record.weight() as _);
+            metrics.memory_entries.decrease(1);
+
+            garbages.push((Event::Evict, record));
+        }
+    }
+}
+
 struct RawCacheInner<E, S, I>
 where
     E: Eviction,
@@ -566,10 +602,10 @@ where
         if !(self.inner.filter)(&key, &value) {
             properties = properties.with_phantom(true);
         }
-        if let Some(location) = properties.location() {
-            if location == Location::OnDisk {
-                properties = properties.with_phantom(true);
-            }
+        if let Some(location) = properties.location()
+            && location == Location::OnDisk
+        {
+            properties = properties.with_phantom(true);
         }
         let record = Arc::new(Record::new(Data {
             key,
@@ -660,6 +696,10 @@ where
             shard.write().evict(0, &mut garbages);
         }
 
+        self.flush_evicted(garbages).await;
+    }
+
+    async fn flush_evicted(&self, garbages: Vec<(Event, Arc<Record<E>>)>) {
         // Deallocate data out of the lock critical section.
         let piped = self.pipe.is_enabled();
 
@@ -797,6 +837,31 @@ where
         let base = total / shards;
         let remainder = total % shards;
         base + usize::from(index < remainder)
+    }
+}
+
+impl<E, S> RawCache<E, S, HashTableIndexer<E>>
+where
+    E: Eviction,
+    S: HashBuilder,
+{
+    /// Evict entries matching the predicate and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and makes sure all matching entries are offloaded.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::flush_if"))]
+    pub async fn flush_if<F>(&self, mut predicate: F)
+    where
+        F: FnMut(&E::Key, &E::Value) -> bool,
+    {
+        let mut garbages = vec![];
+        for shard in self.inner.shards.iter() {
+            shard.write().evict_if(&mut predicate, &mut garbages);
+        }
+
+        drop(predicate);
+        self.flush_evicted(garbages).await;
     }
 }
 
@@ -1038,7 +1103,7 @@ where
             })
         };
 
-        let res = match E::acquire() {
+        match E::acquire() {
             Op::Noop => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| extract(key, shard.get_noop(hash, key), &shard.inflights)),
@@ -1048,9 +1113,7 @@ where
             Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
-        };
-
-        res
+        }
     }
 }
 
@@ -1484,7 +1547,7 @@ where
 #[cfg(test)]
 mod tests {
     use foyer_common::hasher::ModHasher;
-    use rand::{rngs::SmallRng, seq::IndexedRandom, RngCore, SeedableRng};
+    use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 
     use super::*;
     use crate::{
@@ -1512,8 +1575,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn fifo_cache_for_test(
-    ) -> RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
+    fn fifo_cache_for_test()
+    -> RawCache<Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1527,8 +1590,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn s3fifo_cache_for_test(
-    ) -> RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>> {
+    fn s3fifo_cache_for_test()
+    -> RawCache<S3Fifo<u64, u64, TestProperties>, ModHasher, HashTableIndexer<S3Fifo<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1542,8 +1605,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lru_cache_for_test(
-    ) -> RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
+    fn lru_cache_for_test()
+    -> RawCache<Lru<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lru<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1557,8 +1620,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn lfu_cache_for_test(
-    ) -> RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
+    fn lfu_cache_for_test()
+    -> RawCache<Lfu<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Lfu<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1572,8 +1635,8 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn sieve_cache_for_test(
-    ) -> RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Sieve<u64, u64, TestProperties>>> {
+    fn sieve_cache_for_test()
+    -> RawCache<Sieve<u64, u64, TestProperties>, ModHasher, HashTableIndexer<Sieve<u64, u64, TestProperties>>> {
         RawCache::new(RawCacheConfig {
             capacity: 256,
             shards: 4,
@@ -1659,6 +1722,50 @@ mod tests {
         pieces.sort_by_key(|t| t.0);
         let expected = (0..fifo.capacity() as u64).map(|i| (i, i, i)).collect_vec();
         assert_eq!(pieces, expected);
+    }
+
+    async fn assert_flush_if<E>(cache: RawCache<E, ModHasher, HashTableIndexer<E>>)
+    where
+        E: Eviction<Key = u64, Value = u64, Properties = TestProperties>,
+    {
+        let pipe = Arc::new(PiecePipe::default());
+        let cache = cache.with_pipe(pipe.clone());
+
+        for key in 0..8 {
+            cache.insert(key, key * 10);
+        }
+        let pinned = cache.insert(8, 80);
+
+        cache
+            .flush_if(|key, value| (key % 2 == 0 && *value < 60) || *key == 8)
+            .await;
+
+        let mut pieces = pipe
+            .pieces()
+            .iter()
+            .map(|piece| (*piece.key(), *piece.value()))
+            .collect_vec();
+        pieces.sort_unstable();
+        assert_eq!(pieces, vec![(0, 0), (2, 20), (4, 40), (8, 80)]);
+        assert_eq!(cache.entries(), 5);
+        assert_eq!(cache.usage(), 5);
+        assert!(pinned.is_outdated());
+
+        for key in [0, 2, 4, 8] {
+            assert!(cache.get(&key).is_none());
+        }
+        for key in [1, 3, 5, 6, 7] {
+            assert_eq!(*cache.get(&key).unwrap().value(), key * 10);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_flush_if() {
+        assert_flush_if(fifo_cache_for_test()).await;
+        assert_flush_if(s3fifo_cache_for_test()).await;
+        assert_flush_if(lru_cache_for_test()).await;
+        assert_flush_if(lfu_cache_for_test()).await;
+        assert_flush_if(sieve_cache_for_test()).await;
     }
 
     #[test]

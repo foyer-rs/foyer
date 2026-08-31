@@ -21,10 +21,10 @@ use std::{
     hash::Hash,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
-    task::{ready, Context, Poll},
+    task::{Context, Poll, ready},
     time::Instant,
 };
 
@@ -612,6 +612,19 @@ where
         Ok(())
     }
 
+    /// Flush in-memory entries matching the predicate to the disk cache.
+    ///
+    /// The matching entries are removed from the in-memory cache. This function obeys the io throttler of the disk
+    /// cache and makes sure all matching entries are offloaded.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.inner.memory.flush_if(predicate).await;
+    }
+
     /// Gracefully close the hybrid cache.
     ///
     /// `close` will wait for the ongoing flush and reclaim tasks to finish.
@@ -967,14 +980,13 @@ where
         let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll(cx));
 
-        if let Ok(entry) = res.as_ref() {
-            if entry.properties().location() != Location::InMem
-                && *this.policy == HybridCachePolicy::WriteOnInsertion
-                && this.store.is_enabled()
-                && !this.ctx.throttled.load(Ordering::Relaxed)
-            {
-                this.store.enqueue(entry.piece(), false);
-            }
+        if let Ok(entry) = res.as_ref()
+            && entry.properties().location() != Location::InMem
+            && *this.policy == HybridCachePolicy::WriteOnInsertion
+            && this.store.is_enabled()
+            && !this.ctx.throttled.load(Ordering::Relaxed)
+        {
+            this.store.enqueue(entry.piece(), false);
         }
 
         match res.as_ref() {
@@ -1041,9 +1053,9 @@ where
 mod tests {
     use std::{path::Path, sync::Arc};
 
+    use asyncband::barrier::Barrier;
     use foyer_common::{hasher::ModHasher, properties::Source};
-    use foyer_storage::{test_utils::*, StorageFilter};
-    use mea::barrier::Barrier;
+    use foyer_storage::{StorageFilter, test_utils::*};
     use storage::test_utils::Biased;
 
     use crate::*;
@@ -1459,6 +1471,25 @@ mod tests {
             hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
             (1, vec![1; 7 * KB])
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_flush_if() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        hybrid.insert(2, vec![2; 7 * KB]);
+
+        hybrid.flush_if(|key, _| *key == 1).await;
+        hybrid.storage().wait().await;
+
+        assert!(hybrid.memory().get(&1).is_none());
+        assert!(hybrid.memory().get(&2).is_some());
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
+            (1, vec![1; 7 * KB])
+        );
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
     }
 
     #[test_log::test(tokio::test)]
