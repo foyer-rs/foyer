@@ -9,6 +9,42 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-08-31
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.4 |
+| foyer-tokio | 0.22.4 |
+| foyer-common | 0.22.4 |
+| foyer-memory | 0.22.4 |
+| foyer-storage | 0.22.4 |
+| foyer-bench | 0.22.4 |
+
+### Changes
+
+> [!IMPORTANT]
+> **SemVer-incompatible changes:**
+>
+> - Raise the MSRV from Rust 1.85 to 1.91 and migrate to Rust 2024 edition. [#1258](https://github.com/foyer-rs/foyer/pull/1258) [#1275](https://github.com/foyer-rs/foyer/pull/1275) [#1303](https://github.com/foyer-rs/foyer/pull/1303)
+> - Add the `storage_false_positive` field to the publicly constructible `Metrics` struct and the `Unsupported` variant to the exhaustive `ErrorKind` enum. [#1261](https://github.com/foyer-rs/foyer/pull/1261) [#1271](https://github.com/foyer-rs/foyer/pull/1271)
+> - Remove the `as_any()` and `into_any()` methods from the public `IoB` trait. [#1281](https://github.com/foyer-rs/foyer/pull/1281)
+
+Features and enhancements:
+
+- Support selectively flushing matching entries from memory to storage with `Cache::flush_if()` and `HybridCache::flush_if()`. [#1320](https://github.com/foyer-rs/foyer/pull/1320)
+- Expose false-positive storage metrics. [#1261](https://github.com/foyer-rs/foyer/pull/1261)
+- Re-export `SieveConfig` from the `foyer` prelude. [#1285](https://github.com/foyer-rs/foyer/pull/1285)
+- Make `Throttle` constructors and builder methods usable in const contexts. [#1303](https://github.com/foyer-rs/foyer/pull/1303)
+
+Fixes:
+
+- Fix default file-device capacity detection for block devices. [#1271](https://github.com/foyer-rs/foyer/pull/1271)
+- Delete stale storage entries when admission rejects an update. [#1270](https://github.com/foyer-rs/foyer/pull/1270)
+- Fix stale tracing and debug information names. [#1276](https://github.com/foyer-rs/foyer/pull/1276)
+- Fix builds in Bazel sandboxed environments. [#1274](https://github.com/foyer-rs/foyer/pull/1274)
+
 ## 2026-01-23
 
 ### Release
