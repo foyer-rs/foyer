@@ -909,6 +909,26 @@ where
         }
     }
 
+    /// Evict entries matching the predicate and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and makes sure all matching entries are offloaded.
+    /// Therefore, this function is asynchronous.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::flush_if"))]
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.flush_if(predicate).await,
+            Cache::S3Fifo(cache) => cache.flush_if(predicate).await,
+            Cache::Lru(cache) => cache.flush_if(predicate).await,
+            Cache::Lfu(cache) => cache.flush_if(predicate).await,
+            Cache::Sieve(cache) => cache.flush_if(predicate).await,
+        }
+    }
+
     /// Return a new hybrid cache with the given pipe.
     #[doc(hidden)]
     pub fn with_pipe(self, pipe: ArcPipe<K, V, P>) -> Self {
