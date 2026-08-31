@@ -612,6 +612,19 @@ where
         Ok(())
     }
 
+    /// Flush in-memory entries matching the predicate to the disk cache.
+    ///
+    /// The matching entries are removed from the in-memory cache. This function obeys the io throttler of the disk
+    /// cache and makes sure all matching entries are offloaded.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.inner.memory.flush_if(predicate).await;
+    }
+
     /// Gracefully close the hybrid cache.
     ///
     /// `close` will wait for the ongoing flush and reclaim tasks to finish.
@@ -1458,6 +1471,25 @@ mod tests {
             hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
             (1, vec![1; 7 * KB])
         );
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_flush_if() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        hybrid.insert(2, vec![2; 7 * KB]);
+
+        hybrid.flush_if(|key, _| *key == 1).await;
+        hybrid.storage().wait().await;
+
+        assert!(hybrid.memory().get(&1).is_none());
+        assert!(hybrid.memory().get(&2).is_some());
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
+            (1, vec![1; 7 * KB])
+        );
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
     }
 
     #[test_log::test(tokio::test)]
