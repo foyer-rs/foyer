@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod monitor;
+mod release;
 
 use std::{
     ffi::OsStr,
@@ -310,6 +311,8 @@ enum Command {
     Msrv,
     /// Minimize Grafana Dashboard json files.
     Json(JsonArgs),
+    /// Validate a release tag before publishing.
+    ReleaseCheck(release::ReleaseCheckArgs),
     /// Setup monitoring environment for foyer benchmark.
     #[clap(subcommand)]
     Monitor(monitor::MonitorCommand),
@@ -337,6 +340,7 @@ fn main() {
         Command::Madsim => madsim(),
         Command::Msrv => msrv(),
         Command::Json(args) => json(args.check),
+        Command::ReleaseCheck(args) => release::run(args),
         Command::Monitor(cmd) => monitor::run(cmd),
     }
 
