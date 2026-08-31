@@ -12,7 +12,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.23.0-dev"
+version = "0.22.4"
 edition = "2024"
 rust-version = "1.91.0"
 repository = "https://github.com/foyer-rs/foyer"
@@ -42,10 +42,10 @@ equivalent = "1"
 fastant = { version = "0.1.11" }
 fastrace = { version = "0.7.18" }
 fastrace-opentelemetry = { version = "0.18.1" }
-foyer = { version = "0.23.0-dev", path = "foyer", default-features = false }
-foyer-common = { version = "0.23.0-dev", path = "foyer-common", default-features = false }
-foyer-memory = { version = "0.23.0-dev", path = "foyer-memory", default-features = false }
-foyer-storage = { version = "0.23.0-dev", path = "foyer-storage", default-features = false }
+foyer = { version = "0.22.4", path = "foyer", default-features = false }
+foyer-common = { version = "0.22.4", path = "foyer-common", default-features = false }
+foyer-memory = { version = "0.22.4", path = "foyer-memory", default-features = false }
+foyer-storage = { version = "0.22.4", path = "foyer-storage", default-features = false }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -85,7 +85,7 @@ serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
-tokio = { package = "foyer-tokio", version = "0.23.0-dev", path = "foyer-tokio", default-features = false }
+tokio = { package = "foyer-tokio", version = "0.22.4", path = "foyer-tokio", default-features = false }
 # tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
 # Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
 tonic = { version = "0.14.6", default-features = false }
