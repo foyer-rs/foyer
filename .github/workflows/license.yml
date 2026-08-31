@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-      - release-*.*
   pull_request:
     branches:
       - main
-      - release-*.*
 jobs:
   license-header-check:
     runs-on: ubuntu-latest

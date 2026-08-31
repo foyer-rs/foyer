@@ -1,0 +1,102 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/release.py"
+      - ".github/scripts/test_release.py"
+      - ".github/workflows/release.yml"
+      - "**/Cargo.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-test:
+    name: release test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Test release helper
+        run: python3 .github/scripts/test_release.py
+      - name: Check release plan
+        run: python3 .github/scripts/release.py plan
+
+  publish:
+    name: publish crates
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: release-test
+    runs-on: ubuntu-latest
+    concurrency:
+      group: crates-io-release
+      cancel-in-progress: false
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch main
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Validate release
+        run: >-
+          python3 .github/scripts/release.py check
+          --tag "${GITHUB_REF_NAME}"
+          --commit "${GITHUB_SHA}"
+      - name: Authenticate with crates.io
+        id: auth
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18
+      - name: Publish crates
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: python3 .github/scripts/release.py publish --tag "${GITHUB_REF_NAME}"
+
+  github-release:
+    name: create GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --generate-notes \
+            --title "${GITHUB_REF_NAME}"
