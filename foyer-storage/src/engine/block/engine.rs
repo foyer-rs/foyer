@@ -16,6 +16,7 @@ use std::{
     fmt::Debug,
     future::Future,
     marker::PhantomData,
+    num::NonZeroUsize,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -84,10 +85,10 @@ where
     device: Arc<dyn Device>,
     block_size: usize,
     compression: Compression,
-    indexer_shards: usize,
-    recover_concurrency: usize,
-    flushers: usize,
-    reclaimers: usize,
+    indexer_shards: NonZeroUsize,
+    recover_concurrency: NonZeroUsize,
+    flushers: NonZeroUsize,
+    reclaimers: NonZeroUsize,
     buffer_pool_size: usize,
     blob_index_size: usize,
     submit_queue_size_threshold: usize,
@@ -101,6 +102,13 @@ where
     #[cfg(any(test, feature = "test_utils"))]
     load_holder: Holder,
     marker: PhantomData<(K, V, P)>,
+}
+
+fn nonzero(value: usize) -> NonZeroUsize {
+    match NonZeroUsize::new(value) {
+        Some(value) => value,
+        None => unreachable!("default block engine counts are nonzero"),
+    }
 }
 
 impl<K, V, P> Debug for BlockEngineConfig<K, V, P>
@@ -142,10 +150,10 @@ where
             device,
             block_size: 16 * 1024 * 1024, // 16 MiB
             compression: Compression::default(),
-            indexer_shards: 64,
-            recover_concurrency: 8,
-            flushers: 1,
-            reclaimers: 1,
+            indexer_shards: nonzero(64),
+            recover_concurrency: nonzero(8),
+            flushers: nonzero(1),
+            reclaimers: nonzero(1),
             buffer_pool_size: 16 * 1024 * 1024,            // 16 MiB
             blob_index_size: 4 * 1024,                     // 4 KiB
             submit_queue_size_threshold: 16 * 1024 * 1024, // 16 MiB
@@ -178,7 +186,7 @@ where
     /// Set the shard num of the indexer. Each shard has its own lock.
     ///
     /// Default: `64`.
-    pub fn with_indexer_shards(mut self, indexer_shards: usize) -> Self {
+    pub fn with_indexer_shards(mut self, indexer_shards: NonZeroUsize) -> Self {
         self.indexer_shards = indexer_shards;
         self
     }
@@ -186,7 +194,7 @@ where
     /// Set the recover concurrency for the disk cache store.
     ///
     /// Default: `8`.
-    pub fn with_recover_concurrency(mut self, recover_concurrency: usize) -> Self {
+    pub fn with_recover_concurrency(mut self, recover_concurrency: NonZeroUsize) -> Self {
         self.recover_concurrency = recover_concurrency;
         self
     }
@@ -196,7 +204,7 @@ where
     /// The flusher count limits how many blocks can be concurrently written.
     ///
     /// Default: `1`.
-    pub fn with_flushers(mut self, flushers: usize) -> Self {
+    pub fn with_flushers(mut self, flushers: NonZeroUsize) -> Self {
         self.flushers = flushers;
         self
     }
@@ -216,7 +224,7 @@ where
     /// The reclaimer count limits how many blocks can be concurrently reclaimed.
     ///
     /// Default: `1`.
-    pub fn with_reclaimers(mut self, reclaimers: usize) -> Self {
+    pub fn with_reclaimers(mut self, reclaimers: NonZeroUsize) -> Self {
         self.reclaimers = reclaimers;
         self
     }
@@ -355,13 +363,14 @@ where
             None
         };
 
-        let indexer = Indexer::new(self.indexer_shards);
+        let indexer = Indexer::new(self.indexer_shards.get());
         let submit_queue_size = Arc::<AtomicUsize>::default();
 
         #[expect(clippy::type_complexity)]
-        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) = (0..self.flushers)
-            .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
-            .unzip();
+        let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) =
+            (0..self.flushers.get())
+                .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
+                .unzip();
 
         let reclaimer = Reclaimer::new(
             indexer.clone(),
@@ -379,14 +388,14 @@ where
             block_size,
             self.eviction_pickers,
             reclaimer,
-            self.reclaimers,
+            self.reclaimers.get(),
             self.clean_block_threshold,
             metrics.clone(),
             runtime.clone(),
         )?;
         let blocks = block_manager.blocks();
 
-        if self.flushers + self.clean_block_threshold > blocks / 2 {
+        if self.flushers.get() + self.clean_block_threshold > blocks / 2 {
             tracing::warn!(
                 "[block engine]: block-based object disk cache stable blocks count is too small, flusher [{flushers}] + clean block threshold [{clean_block_threshold}] (default = reclaimers) is supposed to be much larger than the block count [{blocks}]",
                 flushers = self.flushers,
@@ -397,7 +406,7 @@ where
         let sequence = AtomicSequence::default();
 
         RecoverRunner::run(
-            self.recover_concurrency,
+            self.recover_concurrency.get(),
             recover_mode,
             self.blob_index_size,
             (0..blocks as BlockId).collect_vec(),
@@ -410,7 +419,7 @@ where
         )
         .await?;
 
-        let io_buffer_size = self.buffer_pool_size / self.flushers;
+        let io_buffer_size = self.buffer_pool_size / self.flushers.get();
         for (flusher, rx) in flushers.iter().zip(rxs) {
             flusher.run(
                 rx,
@@ -905,10 +914,10 @@ mod tests {
             device,
             block_size: 16 * 1024,
             compression: Compression::None,
-            indexer_shards: 4,
-            recover_concurrency: 2,
-            flushers: 1,
-            reclaimers: 1,
+            indexer_shards: nonzero(4),
+            recover_concurrency: nonzero(2),
+            flushers: nonzero(1),
+            reclaimers: nonzero(1),
             clean_block_threshold: 1,
             admission_filter: StorageFilter::new(),
             eviction_pickers: vec![Box::<FifoPicker>::default()],
@@ -948,10 +957,10 @@ mod tests {
             device,
             block_size: 16 * 1024,
             compression: Compression::None,
-            indexer_shards: 4,
-            recover_concurrency: 2,
-            flushers: 1,
-            reclaimers: 1,
+            indexer_shards: nonzero(4),
+            recover_concurrency: nonzero(2),
+            flushers: nonzero(1),
+            reclaimers: nonzero(1),
             clean_block_threshold: 1,
             eviction_pickers: vec![Box::<FifoPicker>::default()],
             admission_filter: StorageFilter::new(),
