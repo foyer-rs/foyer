@@ -45,5 +45,6 @@ pub use crate::{
             psync::{PsyncIoEngine, PsyncIoEngineConfig},
         },
     },
+    keeper::PieceRef,
     store::{Store, StoreBuilder},
 };
