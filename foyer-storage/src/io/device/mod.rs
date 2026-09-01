@@ -22,6 +22,7 @@ use foyer_common::error::Result;
 
 use crate::io::device::statistics::Statistics;
 
+/// Identifier of a device partition.
 pub type PartitionId = u32;
 
 /// Raw os file resource.
@@ -41,9 +42,21 @@ unsafe impl Sync for RawFile {}
 
 /// Device builder trait.
 pub trait DeviceBuilder: Send + Sync + 'static + Debug {
+    /// Device built by this builder.
+    type Device: Device;
+
     /// Build a device from the given configuration.
-    fn build(self) -> Result<Arc<dyn Device>>;
+    fn build(self) -> Result<Arc<Self::Device>>;
 }
+
+/// Marker trait for devices supported by an engine config.
+///
+/// Implementations form the compile-time compatibility list between engine configs and devices.
+#[diagnostic::on_unimplemented(
+    message = "device `{Self}` is not compatible with engine config `{E}`",
+    label = "unsupported engine-device combination"
+)]
+pub trait DeviceFor<E: ?Sized>: Device {}
 
 /// Partition is a logical segment of a device.
 pub trait Partition: Send + Sync + 'static + Debug + Any {

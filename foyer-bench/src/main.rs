@@ -41,7 +41,7 @@ use exporter::PrometheusExporter;
 #[cfg(target_os = "linux")]
 use foyer::UringIoEngineConfig;
 use foyer::{
-    BlockEngineConfig, Code, Compression, Device, DeviceBuilder, EngineConfig, FifoConfig, FifoPicker,
+    BlockEngineConfig, Code, Compression, DeviceBuilder, DeviceFor, EngineConfig, FifoConfig, FifoPicker,
     FileDeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, HybridCachePolicy, HybridCacheProperties,
     InvalidRatioPicker, IoEngineConfig, LfuConfig, LruConfig, NoopDeviceBuilder, PsyncIoEngineConfig, RecoverMode,
     S3FifoConfig, Spawner, Throttle, TracingOptions,
@@ -482,6 +482,28 @@ fn main() {
     runtime.block_on(benchmark(args));
 }
 
+fn block_engine_config<D>(device: Arc<D>, args: &Args) -> Box<dyn EngineConfig<u64, Value, HybridCacheProperties>>
+where
+    D: DeviceFor<BlockEngineConfig<u64, Value, HybridCacheProperties>>,
+{
+    let mut config = BlockEngineConfig::new(device)
+        .with_block_size(args.block_size.as_u64() as _)
+        .with_indexer_shards(args.shards)
+        .with_recover_concurrency(args.recover_concurrency)
+        .with_flushers(args.flushers)
+        .with_reclaimers(args.reclaimers)
+        .with_eviction_pickers(vec![
+            Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
+            Box::new(FifoPicker::new(args.block_engine_fifo_probation_ratio)),
+        ])
+        .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
+        .with_blob_index_size(args.blob_index_size.as_u64() as _);
+    if args.clean_block_threshold > 0 {
+        config = config.with_clean_block_threshold(args.clean_block_threshold);
+    }
+    config.boxed()
+}
+
 async fn benchmark(args: Args) {
     setup();
 
@@ -579,7 +601,7 @@ async fn benchmark(args: Args) {
         .with_read_throughput(args.disk_read_throughput.as_u64() as _)
         .with_write_throughput(args.disk_write_throughput.as_u64() as _);
 
-    let device: Arc<dyn Device> = match (args.file.as_ref(), args.dir.as_ref()) {
+    let engine_config = match (args.file.as_ref(), args.dir.as_ref()) {
         (Some(file), None) => {
             let mut builder = FileDeviceBuilder::new(file);
             builder = builder.with_capacity(args.disk.as_u64() as _).with_throttle(throttle);
@@ -587,7 +609,7 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.build().unwrap()
+            block_engine_config(builder.build().unwrap(), &args)
         }
         (None, Some(dir)) => {
             let mut builder = FsDeviceBuilder::new(dir);
@@ -596,9 +618,9 @@ async fn benchmark(args: Args) {
             {
                 builder = builder.with_direct(args.direct);
             }
-            builder.build().unwrap()
+            block_engine_config(builder.build().unwrap(), &args)
         }
-        (None, None) => NoopDeviceBuilder::default().build().unwrap(),
+        (None, None) => block_engine_config(NoopDeviceBuilder::default().build().unwrap(), &args),
         _ => unreachable!(),
     };
 
@@ -628,26 +650,6 @@ async fn benchmark(args: Args) {
             .boxed(),
         _ => unreachable!(),
     };
-
-    let engine_config: Box<dyn EngineConfig<u64, Value, HybridCacheProperties>> = {
-        let mut builder = BlockEngineConfig::new(device)
-            .with_block_size(args.block_size.as_u64() as _)
-            .with_indexer_shards(args.shards)
-            .with_recover_concurrency(args.recover_concurrency)
-            .with_flushers(args.flushers)
-            .with_reclaimers(args.reclaimers)
-            .with_eviction_pickers(vec![
-                Box::new(InvalidRatioPicker::new(args.invalid_ratio)),
-                Box::new(FifoPicker::new(args.block_engine_fifo_probation_ratio)),
-            ])
-            .with_buffer_pool_size(args.buffer_pool_size.as_u64() as _)
-            .with_blob_index_size(args.blob_index_size.as_u64() as _);
-        if args.clean_block_threshold > 0 {
-            builder = builder.with_clean_block_threshold(args.clean_block_threshold);
-        }
-        builder
-    }
-    .boxed();
 
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())

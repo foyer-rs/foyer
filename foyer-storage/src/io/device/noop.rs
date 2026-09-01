@@ -41,7 +41,9 @@ impl Default for NoopDeviceBuilder {
 }
 
 impl DeviceBuilder for NoopDeviceBuilder {
-    fn build(self) -> Result<Arc<dyn Device>> {
+    type Device = NoopDevice;
+
+    fn build(self) -> Result<Arc<Self::Device>> {
         let statistics = Arc::new(Statistics::new(Throttle::default()));
         Ok(Arc::new(NoopDevice {
             partitions: RwLock::new(vec![]),
@@ -52,6 +54,7 @@ impl DeviceBuilder for NoopDeviceBuilder {
 }
 
 #[derive(Debug)]
+/// A no-operation mock device.
 pub struct NoopDevice {
     partitions: RwLock<Vec<Arc<NoopPartition>>>,
 

@@ -76,7 +76,9 @@ impl FsDeviceBuilder {
 }
 
 impl DeviceBuilder for FsDeviceBuilder {
-    fn build(self) -> Result<Arc<dyn Device>> {
+    type Device = FsDevice;
+
+    fn build(self) -> Result<Arc<Self::Device>> {
         // Normalize configurations.
 
         let align_v = |value: usize, align: usize| value - value % align;
@@ -104,8 +106,7 @@ impl DeviceBuilder for FsDeviceBuilder {
             direct: self.direct,
             partitions: RwLock::new(vec![]),
         };
-        let device: Arc<dyn Device> = Arc::new(device);
-        Ok(device)
+        Ok(Arc::new(device))
     }
 }
 

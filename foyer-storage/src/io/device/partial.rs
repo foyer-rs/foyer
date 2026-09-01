@@ -46,7 +46,9 @@ impl PartialDeviceBuilder {
 }
 
 impl DeviceBuilder for PartialDeviceBuilder {
-    fn build(self) -> Result<Arc<dyn Device>> {
+    type Device = PartialDevice;
+
+    fn build(self) -> Result<Arc<Self::Device>> {
         Ok(Arc::new(PartialDevice {
             inner: self.device,
             capacity: self.capacity,

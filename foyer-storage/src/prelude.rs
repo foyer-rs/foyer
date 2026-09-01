@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use foyer_common::error::{Error, ErrorKind, Result};
+
 #[cfg(target_os = "linux")]
 pub use crate::io::engine::uring::{UringIoEngine, UringIoEngineConfig};
 pub use crate::{
@@ -30,12 +32,12 @@ pub use crate::{
     },
     io::{
         device::{
-            Device, DeviceBuilder, RawFile,
-            combined::CombinedDeviceBuilder,
-            file::FileDeviceBuilder,
-            fs::FsDeviceBuilder,
-            noop::NoopDeviceBuilder,
-            partial::PartialDeviceBuilder,
+            Device, DeviceBuilder, DeviceFor, Partition, PartitionId, RawFile,
+            combined::{CombinedDevice, CombinedDeviceBuilder},
+            file::{FileDevice, FileDeviceBuilder},
+            fs::{FsDevice, FsDeviceBuilder},
+            noop::{NoopDevice, NoopDeviceBuilder},
+            partial::{PartialDevice, PartialDeviceBuilder},
             statistics::Statistics,
             throttle::{IopsCounter, Throttle},
         },

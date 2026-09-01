@@ -76,7 +76,9 @@ impl FileDeviceBuilder {
 }
 
 impl DeviceBuilder for FileDeviceBuilder {
-    fn build(self) -> Result<Arc<dyn Device>> {
+    type Device = FileDevice;
+
+    fn build(self) -> Result<Arc<Self::Device>> {
         // Normalize configurations.
 
         let align_v = |value: usize, align: usize| value - (value % align);
@@ -133,8 +135,7 @@ impl DeviceBuilder for FileDeviceBuilder {
             statistics,
             partitions: RwLock::new(vec![]),
         };
-        let device: Arc<dyn Device> = Arc::new(device);
-        Ok(device)
+        Ok(Arc::new(device))
     }
 }
 

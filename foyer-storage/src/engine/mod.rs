@@ -195,4 +195,5 @@ where
 }
 
 pub mod block;
+mod compatibility;
 pub mod noop;
