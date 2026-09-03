@@ -308,7 +308,11 @@ where
             garbages.push(record);
         }
 
+        let usage = std::mem::take(&mut self.usage);
         self.entries = 0;
+        if usage > 0 {
+            self.metrics.memory_usage.decrease(usage as _);
+        }
         if count > 0 {
             self.metrics.memory_entries.decrease(count);
             self.metrics.memory_remove.increase(count);
@@ -1766,6 +1770,28 @@ mod tests {
         assert_flush_if(lru_cache_for_test()).await;
         assert_flush_if(lfu_cache_for_test()).await;
         assert_flush_if(sieve_cache_for_test()).await;
+    }
+
+    #[test]
+    fn test_clear_resets_usage() {
+        let fifo = fifo_cache_for_test();
+
+        for i in 0..4 {
+            fifo.insert(i, i);
+        }
+        assert_eq!(fifo.usage(), 4);
+        assert_eq!(fifo.entries(), 4);
+
+        fifo.clear();
+        assert_eq!(fifo.usage(), 0);
+        assert_eq!(fifo.entries(), 0);
+
+        // Clearing an empty cache must be idempotent, and accounting must remain
+        // correct when the cache is used again.
+        fifo.clear();
+        fifo.insert(4, 4);
+        assert_eq!(fifo.usage(), 1);
+        assert_eq!(fifo.entries(), 1);
     }
 
     #[test]
