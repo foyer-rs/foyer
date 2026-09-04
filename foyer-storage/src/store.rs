@@ -261,13 +261,17 @@ where
 
     /// Check if the disk cache contains a cached entry with the given key.
     ///
-    /// `contains` may return a false-positive result if there is a hash collision with the given key.
+    /// Besides the entries that are already written to the device, `may_contains` may also return `true` for an entry
+    /// that was recently enqueued but not yet flushed, which [`Store::load`] can still serve from the keeper. Whether
+    /// such an in-flight entry is reported is not guaranteed.
+    ///
+    /// `may_contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn may_contains<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.may_contains(hash)
+        self.inner.keeper.contains(hash, key) || self.inner.engine.may_contains(hash)
     }
 
     /// Delete all cached entries of the disk cache.
@@ -582,6 +586,97 @@ mod tests {
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
         assert_eq!(l2.entry().unwrap().1, "bar");
+    }
+
+    #[tokio::test]
+    async fn test_may_contains_in_flight_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
+        let flush_switch = Switch::default();
+        flush_switch.on();
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_flush_switch(flush_switch.clone()),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), true);
+
+        // The entry is in-flight: `load` serves it from the keeper, so `may_contains` must agree.
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Piece { .. }));
+        assert!(store.may_contains(&1));
+        assert!(!store.may_contains(&2));
+
+        // Let the flusher write the entry to the device.
+        flush_switch.off();
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Entry { ref value, .. } if value == b"v1"));
+        assert!(store.may_contains(&1));
+        assert!(!store.may_contains(&2));
+    }
+
+    /// `delete` writes a tombstone to the engine indexer, but it does not evict the keeper. So an entry that is deleted
+    /// while still in-flight keeps being served by `load`, and `may_contains` reports it accordingly.
+    #[tokio::test]
+    async fn test_may_contains_in_flight_entry_after_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
+        let flush_switch = Switch::default();
+        flush_switch.on();
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_flush_switch(flush_switch.clone()),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), true);
+        store.delete(&1);
+
+        // The keeper still holds the in-flight entry, so `load` still serves it and `may_contains` agrees.
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Piece { .. }));
+        assert!(store.may_contains(&1));
+
+        // Once the flush finishes, the keeper releases the entry and the tombstone takes effect.
+        flush_switch.off();
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Miss));
+        assert!(!store.may_contains(&1));
     }
 
     #[tokio::test]
