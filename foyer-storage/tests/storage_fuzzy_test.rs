@@ -16,7 +16,7 @@
 
 #![expect(clippy::identity_op)]
 
-use std::{path::Path, sync::Arc};
+use std::{num::NonZeroUsize, path::Path, sync::Arc};
 
 use foyer_common::{hasher::ModHasher, metrics::Metrics};
 use foyer_memory::{Cache, CacheBuilder, FifoConfig, TestProperties};
@@ -29,6 +29,13 @@ const MB: usize = 1024 * 1024;
 
 const INSERTS: usize = 100;
 const LOOPS: usize = 10;
+
+fn nonzero(value: usize) -> NonZeroUsize {
+    match NonZeroUsize::new(value) {
+        Some(value) => value,
+        None => unreachable!("test constants are nonzero"),
+    }
+}
 
 async fn test_store(
     memory: Cache<u64, Vec<u8>, ModHasher, TestProperties>,
@@ -111,8 +118,8 @@ fn basic(
         BlockEngineConfig::new(FsDeviceBuilder::new(path).with_capacity(4 * MB).build().unwrap())
             .with_admission_filter(StorageFilter::new().with_condition(recorder.admission()))
             .with_block_size(MB)
-            .with_recover_concurrency(2)
-            .with_indexer_shards(4)
+            .with_recover_concurrency(nonzero(2))
+            .with_indexer_shards(nonzero(4))
             .with_reinsertion_filter(StorageFilter::new().with_condition(recorder.eviction())),
     )
 }

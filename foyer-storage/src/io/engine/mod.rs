@@ -125,6 +125,9 @@ pub trait IoEngine: Send + Sync + 'static + Debug {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(madsim))]
+    #[cfg(target_os = "linux")]
+    use std::num::NonZeroUsize;
     use std::path::Path;
 
     use rand::{Fill, rng};
@@ -142,6 +145,15 @@ mod tests {
 
     const KIB: usize = 1024;
     const MIB: usize = 1024 * 1024;
+
+    #[cfg(not(madsim))]
+    #[cfg(target_os = "linux")]
+    fn nonzero(value: usize) -> NonZeroUsize {
+        match NonZeroUsize::new(value) {
+            Some(value) => value,
+            None => unreachable!("test constants are nonzero"),
+        }
+    }
 
     fn build_test_file_device(path: impl AsRef<Path>) -> Result<Arc<dyn Device>> {
         let device = FileDeviceBuilder::new(&path).with_capacity(16 * MIB).build()?;
@@ -176,8 +188,8 @@ mod tests {
             let path = dir.path().join("test_file_1");
             let device = build_test_file_device(&path).unwrap();
             let engine = UringIoEngineConfig::new()
-                .with_threads(4)
-                .with_io_depth(64)
+                .with_threads(nonzero(4))
+                .with_io_depth(nonzero(64))
                 .boxed()
                 .build(IoEngineBuildContext {
                     spawner: Spawner::current(),
