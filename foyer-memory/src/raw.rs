@@ -153,10 +153,11 @@ where
         // Concurrent fetches can return the same record retained by the disk keeper.
         // Reuse a resident record without unlinking and reinserting it.
         if record.is_in_indexer() {
-            strict_assert!(self
-                .indexer
-                .get(record.hash(), record.key())
-                .is_some_and(|resident| Arc::ptr_eq(resident, &record)));
+            strict_assert!(
+                self.indexer
+                    .get(record.hash(), record.key())
+                    .is_some_and(|resident| Arc::ptr_eq(resident, &record))
+            );
             record.inc_refs(notifiers.len() + 1);
             return;
         }
