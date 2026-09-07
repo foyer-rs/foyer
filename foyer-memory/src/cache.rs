@@ -1289,6 +1289,27 @@ mod tests {
         join_all(handles).await;
     }
 
+    #[test]
+    fn test_reinsert_resident_piece() {
+        for pin in [false, true] {
+            let cache: Cache<u64, u64> = CacheBuilder::new(2).with_shards(1).build();
+            let entry = cache.insert(1, 1);
+            drop(cache.insert(2, 2));
+            let pinned = pin.then(|| cache.get(&1).unwrap());
+            let refs = entry.refs();
+            let reinserted = cache.insert_piece(entry.piece());
+            assert_eq!(entry.refs(), refs + 1);
+            assert_eq!(cache.usage(), 2);
+            assert_eq!(*reinserted.value(), 1);
+            assert!(cache.contains(&2));
+            drop((entry, pinned, reinserted));
+            let entry = cache.get(&1).unwrap();
+            assert_eq!(entry.refs(), 1);
+            drop(entry);
+            cache.clear();
+        }
+    }
+
     #[tokio::test]
     async fn test_fifo_cache() {
         case(fifo()).await
