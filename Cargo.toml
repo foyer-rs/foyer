@@ -26,7 +26,12 @@ exclude = ["website/*"]
 [workspace.dependencies]
 allocator-api2 = "0.2"
 anyhow = "1"
-asyncband = "0.6.7"
+asyncband = { version = "0.7.1", features = [
+  "barrier",
+  "mpsc",
+  "mutex",
+  "oneshot",
+] }
 bincode = "1"
 bitflags = "2"
 bytes = "1"
