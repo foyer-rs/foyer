@@ -26,6 +26,7 @@ exclude = ["website/*"]
 [workspace.dependencies]
 allocator-api2 = "0.2"
 anyhow = "1"
+asyncband = "0.6.7"
 bincode = "1"
 bitflags = "2"
 bytes = "1"
@@ -61,7 +62,6 @@ itertools = { version = "0.15.0" }
 jiff = { version = "0.2.16" }
 libc = "0.2"
 lz4 = "1"
-asyncband = "0.6.7"
 mixtrics = "0.2"
 moka = "0.12"
 opentelemetry = { version = "0.32.0" }
