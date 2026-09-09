@@ -22,6 +22,7 @@ tracing = ["dep:fastrace", "foyer-common/tracing"]
 
 [dependencies]
 anyhow = { workspace = true }
+asyncband = { workspace = true }
 bitflags = { workspace = true }
 datasketches = { workspace = true, features = ["countmin"] }
 equivalent = { workspace = true }
@@ -31,7 +32,6 @@ futures-util = { workspace = true }
 hashbrown = { workspace = true }
 intrusive-collections = { workspace = true }
 itertools = { workspace = true }
-asyncband = { workspace = true }
 mixtrics = { workspace = true }
 parking_lot = { workspace = true }
 paste = { workspace = true }

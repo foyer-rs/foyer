@@ -213,6 +213,7 @@ where
         };
 
         strict_assert!(!state.link.is_linked());
+        state.is_pinned = false;
 
         record.set_in_eviction(false);
     }
@@ -228,6 +229,7 @@ where
             if state.in_high_priority_pool {
                 state.in_high_priority_pool = false;
             }
+            state.is_pinned = false;
 
             record.set_in_eviction(false);
         }
@@ -522,6 +524,49 @@ pub mod tests {
 
         lru.clear();
         assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_lru_reinsert_pinned_record() {
+        for hint in [Hint::Normal, Hint::Low] {
+            for clear in [false, true] {
+                for acquire in [false, true] {
+                    let record = Arc::new(Record::new(Data {
+                        key: 0u64,
+                        value: 0u64,
+                        properties: TestProperties::default().with_hint(hint),
+                        hash: 0,
+                        weight: 1,
+                    }));
+                    let mut lru = TestLru::new(10, &LruConfig::default());
+                    lru.push(record.clone());
+                    lru.acquire_mutable(&record);
+                    if clear {
+                        lru.clear();
+                    } else {
+                        lru.remove(&record);
+                    }
+                    // A keeper can retain and reinsert the same record after removal.
+                    lru.push(record.clone());
+                    if acquire {
+                        lru.acquire_mutable(&record);
+                        assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![record.clone()]]);
+                        assert_eq!(lru.high_priority_weight, 0);
+                    }
+                    lru.release_mutable(&record);
+                    let expected = match hint {
+                        Hint::Normal => vec![vec![], vec![record.clone()], vec![]],
+                        Hint::Low => vec![vec![record.clone()], vec![], vec![]],
+                    };
+                    assert_ptr_vec_vec_eq(lru.dump(), expected);
+                    assert_eq!(lru.high_priority_weight, usize::from(hint == Hint::Normal));
+                    lru.remove(&record);
+                    assert_ptr_vec_vec_eq(lru.dump(), vec![vec![], vec![], vec![]]);
+                    assert_eq!(lru.high_priority_weight, 0);
+                    lru.clear();
+                }
+            }
+        }
     }
 
     #[test]

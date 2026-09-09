@@ -9,6 +9,30 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-09-07
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.5 |
+| foyer-tokio | 0.22.5 |
+| foyer-common | 0.22.5 |
+| foyer-memory | 0.22.5 |
+| foyer-storage | 0.22.5 |
+| foyer-bench | 0.22.5 |
+
+### Changes
+
+Fixes:
+
+- Reset pinned state when removing or clearing LRU records so reinserting a retained record preserves eviction list membership and priority weights. [#1339](https://github.com/foyer-rs/foyer/pull/1339)
+- Reuse records already resident in memory when concurrent fetches return the same retained record, preserving reference counts and other cached entries. [#1339](https://github.com/foyer-rs/foyer/pull/1339)
+
+Dependencies:
+
+- Upgrade asyncband to 0.7.1 with explicit barrier, mpsc, mutex, and oneshot features. [#1340](https://github.com/foyer-rs/foyer/pull/1340)
+
 ## 2026-08-31
 
 ### Release
