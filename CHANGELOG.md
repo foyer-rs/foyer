@@ -9,6 +9,31 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-09-09
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.6 |
+| foyer-tokio | 0.22.6 |
+| foyer-common | 0.22.6 |
+| foyer-memory | 0.22.6 |
+| foyer-storage | 0.22.6 |
+| foyer-bench | 0.22.6 |
+
+### Changes
+
+Features and enhancements:
+
+- Export `PieceRef` so downstream crates can implement the `Engine` trait. [#1330](https://github.com/foyer-rs/foyer/pull/1330)
+
+Fixes:
+
+- Fix musl builds by using platform-appropriate ioctl request types for device capacity detection. [#1342](https://github.com/foyer-rs/foyer/pull/1342)
+- Check the keeper in `Store::may_contains()` so entries still in flight can be reported before they reach the engine index. [#1337](https://github.com/foyer-rs/foyer/pull/1337)
+- Make `HybridCache::is_hybrid()` return `false` when no storage engine is configured, so callers can correctly guard disk-cache operations such as `flush_if()`. [#1343](https://github.com/foyer-rs/foyer/pull/1343)
+
 ## 2026-09-07
 
 ### Release
