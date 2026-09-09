@@ -93,6 +93,11 @@ where
     }
 }
 
+/// A reference to an in-memory cache [`Piece`] that is held while the piece sits in the disk
+/// cache write queue.
+///
+/// Handed to [`crate::Engine::enqueue`] implementations, and dereferences to the [`Piece`]
+/// it wraps.
 pub struct PieceRef<K, V, P>
 where
     K: StorageKey,
