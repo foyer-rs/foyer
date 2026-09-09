@@ -14,33 +14,41 @@
 
 #[cfg(unix)]
 pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::error::Result<usize> {
-    use foyer_common::error::Error;
-
-    const BLKGETSIZE64: u64 = 0x80081272;
-    const DIOCGMEDIASIZE: u64 = 0x40086481;
-    const DKIOCGETBLOCKSIZE: u64 = 0x40046418;
-    const DKIOCGETBLOCKCOUNT: u64 = 0x40046419;
-
     use std::{fs::File, os::fd::AsRawFd};
 
     let file = File::open(path.as_ref())?;
     let fd = file.as_raw_fd();
 
-    if cfg!(target_os = "linux") {
+    #[cfg(target_os = "linux")]
+    {
+        const BLKGETSIZE64: u32 = 0x80081272;
+
         let mut size: u64 = 0;
-        let res = unsafe { libc::ioctl(fd, BLKGETSIZE64, &mut size) };
+        // The request is c_ulong on glibc and c_int on musl; preserve its bits when casting.
+        let res = unsafe { libc::ioctl(fd, BLKGETSIZE64 as _, &mut size) };
         if res != 0 {
             return Err(std::io::Error::from_raw_os_error(res).into());
         }
         Ok(size as usize)
-    } else if cfg!(target_os = "freebsd") {
+    }
+
+    #[cfg(target_os = "freebsd")]
+    {
+        const DIOCGMEDIASIZE: libc::c_ulong = 0x40086481;
+
         let mut size: u32 = 0;
         let res = unsafe { libc::ioctl(fd, DIOCGMEDIASIZE, &mut size) };
         if res != 0 {
             return Err(std::io::Error::from_raw_os_error(res).into());
         }
         Ok(size as usize)
-    } else if cfg!(target_os = "macos") {
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        const DKIOCGETBLOCKSIZE: libc::c_ulong = 0x40046418;
+        const DKIOCGETBLOCKCOUNT: libc::c_ulong = 0x40046419;
+
         let mut block_size: u64 = 0;
         let mut block_count: u64 = 0;
         let res = unsafe { libc::ioctl(fd, DKIOCGETBLOCKSIZE, &mut block_size) };
@@ -53,8 +61,13 @@ pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::erro
         }
         let size = block_size * block_count;
         Ok(size as usize)
-    } else {
-        use foyer_common::error::ErrorKind;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "freebsd", target_os = "macos")))]
+    {
+        use foyer_common::error::{Error, ErrorKind};
+
+        let _ = fd;
 
         Err(Error::new(
             ErrorKind::Unsupported,
