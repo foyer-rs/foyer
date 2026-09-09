@@ -597,6 +597,10 @@ where
 
     /// Check if the hybrid cache contains a cached entry with the given key.
     ///
+    /// `contains` covers the in-memory cache and the disk cache. Besides the disk cache entries that are already
+    /// written to the device, `contains` may also return `true` for an entry that was recently enqueued to the disk
+    /// cache but not yet flushed. Whether such an in-flight entry is reported is not guaranteed.
+    ///
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
@@ -1601,6 +1605,40 @@ mod tests {
             .unwrap();
         assert_eq!(e5.source(), Source::Disk);
         drop(e5);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_contains_in_flight_entry() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let flush_switch = Switch::default();
+
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnInsertion),
+            |b| b.with_flush_switch(flush_switch.clone()),
+        )
+        .await;
+
+        // Hold the flusher, so that the inserted entry stays in the disk cache write queue.
+        flush_switch.on();
+
+        drop(hybrid.insert(1, vec![1; 7 * KB]));
+        // Drop the in-memory copy, so that only the disk cache can answer for the entry.
+        hybrid.memory().remove(&1);
+        assert!(!hybrid.memory().contains(&1));
+
+        // The entry is in-flight but still retrievable, so `contains` must report it.
+        assert!(hybrid.contains(&1));
+        assert_eq!(hybrid.get(&1).await.unwrap().unwrap().value(), &vec![1; 7 * KB]);
+
+        // Let the flusher write the entry to the device.
+        flush_switch.off();
+        hybrid.storage().wait().await;
+
+        hybrid.memory().remove(&1);
+        assert!(hybrid.contains(&1));
+        assert!(!hybrid.contains(&2));
     }
 
     #[test_log::test(tokio::test)]

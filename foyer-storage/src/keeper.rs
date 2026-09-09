@@ -87,6 +87,16 @@ where
         shard.find(hash, |p| key.equivalent(p.key())).cloned()
     }
 
+    /// Check if the keeper holds a piece with the given key without cloning it.
+    pub fn contains<Q>(&self, hash: u64, key: &Q) -> bool
+    where
+        Q: Hash + equivalent::Equivalent<K> + ?Sized,
+    {
+        let shard = self.shard(hash);
+        let shard = shard.read();
+        shard.find(hash, |p| key.equivalent(p.key())).is_some()
+    }
+
     fn shard(&self, hash: u64) -> Arc<RwLock<Shard<K, V, P>>> {
         let index = (hash as usize) % self.inner.shards.len();
         self.inner.shards[index].clone()
