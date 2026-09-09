@@ -1098,6 +1098,33 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_in_memory() {
+        let hybrid: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+
+        assert_eq!(hybrid.storage().device().capacity(), 0);
+        assert!(!hybrid.storage().is_enabled());
+        assert!(!hybrid.is_hybrid());
+
+        hybrid.insert(1, 1);
+        if hybrid.is_hybrid() {
+            hybrid.flush_if(|_, _| true).await;
+        }
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &1);
+        hybrid.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_with_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+
+        assert!(hybrid.storage().device().capacity() > 0);
+        assert!(hybrid.storage().is_enabled());
+        assert!(hybrid.is_hybrid());
+        hybrid.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_hybrid_cache() {
         let dir = tempfile::tempdir().unwrap();
 
