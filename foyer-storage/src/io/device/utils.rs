@@ -12,6 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_os = "linux")]
+const BLKGETSIZE64: u32 = 0x80081272;
+#[cfg(target_os = "freebsd")]
+const DIOCGMEDIASIZE: libc::c_ulong = 0x40086481;
+#[cfg(target_os = "macos")]
+const DKIOCGETBLOCKSIZE: libc::c_ulong = 0x40046418;
+#[cfg(target_os = "macos")]
+const DKIOCGETBLOCKCOUNT: libc::c_ulong = 0x40046419;
+
 #[cfg(unix)]
 pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::error::Result<usize> {
     use std::{fs::File, os::fd::AsRawFd};
@@ -21,8 +30,6 @@ pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::erro
 
     #[cfg(target_os = "linux")]
     {
-        const BLKGETSIZE64: u32 = 0x80081272;
-
         let mut size: u64 = 0;
         // The request is c_ulong on glibc and c_int on musl; preserve its bits when casting.
         let res = unsafe { libc::ioctl(fd, BLKGETSIZE64 as _, &mut size) };
@@ -34,8 +41,6 @@ pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::erro
 
     #[cfg(target_os = "freebsd")]
     {
-        const DIOCGMEDIASIZE: libc::c_ulong = 0x40086481;
-
         let mut size: u32 = 0;
         let res = unsafe { libc::ioctl(fd, DIOCGMEDIASIZE, &mut size) };
         if res != 0 {
@@ -46,9 +51,6 @@ pub fn get_dev_capacity(path: impl AsRef<std::path::Path>) -> foyer_common::erro
 
     #[cfg(target_os = "macos")]
     {
-        const DKIOCGETBLOCKSIZE: libc::c_ulong = 0x40046418;
-        const DKIOCGETBLOCKCOUNT: libc::c_ulong = 0x40046419;
-
         let mut block_size: u64 = 0;
         let mut block_count: u64 = 0;
         let res = unsafe { libc::ioctl(fd, DKIOCGETBLOCKSIZE, &mut block_size) };
