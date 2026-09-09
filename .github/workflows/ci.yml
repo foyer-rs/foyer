@@ -156,6 +156,26 @@ jobs:
           echo "If you want to pass the test, please install the nightly toolchain with \`rustup install nightly\`."
           echo "Then run \`make ffmt\`."
 
+  rust-musl-check:
+    name: rust musl check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - name: Check musl build
+        run: cargo check -p foyer --target x86_64-unknown-linux-musl
+
   rust-test:
     name: rust test with codecov
     strategy:
