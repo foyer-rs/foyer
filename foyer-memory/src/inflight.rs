@@ -207,18 +207,18 @@ where
                 let (tx, rx) = oneshot::channel();
                 let id = self.next_id;
                 self.next_id += 1;
+                let close = Arc::new(AtomicBool::new(false));
                 let entry = InflightEntry {
                     hash,
                     key: key.to_owned(),
                     inflight: Inflight {
                         id,
-                        close: Arc::new(AtomicBool::new(false)),
+                        close: close.clone(),
                         notifiers: vec![tx],
                         f: None,
                     },
                 };
                 v.insert(entry);
-                let close = Arc::new(AtomicBool::new(false));
                 Enqueue::Lead {
                     id,
                     close,
