@@ -1088,30 +1088,38 @@ where
                     source: Source::Memory,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, fr()) {
-                Enqueue::Lead {
-                    id,
-                    close,
-                    waiter,
-                    required_fetch_builder,
-                } => {
-                    let fetch = RawFetch {
-                        state: RawFetchState::Init {
-                            optional_fetch_builder: fo(),
-                            required_fetch_builder,
-                        },
+            .unwrap_or_else(|| {
+                // The inflight guard is a temporary of this statement, so it is released before
+                // the spawn below. Spawning while holding it deadlocks when the runtime is
+                // shutting down: tokio cancels a task spawned on a closing runtime synchronously
+                // and drops the fetch on this thread, and `RawFetch::drop` takes the same lock to
+                // dequeue itself.
+                let enqueued = inflights.lock().enqueue(hash, key, fr());
+                match enqueued {
+                    Enqueue::Lead {
                         id,
-                        hash,
-                        key: Some(key.to_owned()),
-                        ctx,
-                        cache: self.clone(),
-                        inflights: inflights.clone(),
                         close,
-                    };
-                    spawner.spawn(fetch);
-                    RawGetOrFetch::Miss(RawWait { waiter })
+                        waiter,
+                        required_fetch_builder,
+                    } => {
+                        let fetch = RawFetch {
+                            state: RawFetchState::Init {
+                                optional_fetch_builder: fo(),
+                                required_fetch_builder,
+                            },
+                            id,
+                            hash,
+                            key: Some(key.to_owned()),
+                            ctx,
+                            cache: self.clone(),
+                            inflights: inflights.clone(),
+                            close,
+                        };
+                        spawner.spawn(fetch);
+                        RawGetOrFetch::Miss(RawWait { waiter })
+                    }
+                    Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
                 }
-                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
             })
         };
 
