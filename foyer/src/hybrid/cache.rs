@@ -1479,6 +1479,56 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_memory_rejected_disk_hit_is_not_written_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let flush_switch = Switch::default();
+        let recorder = Recorder::default();
+        let engine_config =
+            BlockEngineConfig::new(FsDeviceBuilder::new(dir.path()).with_capacity(16 * MB).build().unwrap())
+                .with_block_size(MB)
+                .with_flush_switch(flush_switch.clone())
+                .with_admission_filter(StorageFilter::new().with_condition(recorder.admission()));
+        let hybrid = HybridCacheBuilder::new()
+            .with_name("test")
+            .with_policy(HybridCachePolicy::WriteOnEviction)
+            .memory(4 * MB)
+            .with_hash_builder(ModHasher::default())
+            .with_filter(|_, _| false)
+            .storage()
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(engine_config)
+            .build()
+            .await
+            .unwrap();
+
+        hybrid.insert_with_properties(
+            1,
+            vec![1; 7 * KB],
+            HybridCacheProperties::default().with_location(Location::OnDisk),
+        );
+        hybrid.storage().wait().await;
+        assert!(hybrid.memory().get(&1).is_none());
+        let admissions_before = recorder.dump();
+        assert_eq!(admissions_before, vec![Record::Admit(1)]);
+
+        flush_switch.on();
+        let entry = hybrid.get(&1).await.unwrap().expect("entry should load from disk");
+        assert_eq!(entry.source(), Source::Disk);
+        drop(entry);
+
+        assert_eq!(
+            recorder.dump(),
+            admissions_before,
+            "a disk hit must not run disk admission again"
+        );
+        assert!(
+            matches!(hybrid.storage().load(&1).await.unwrap(), Load::Entry { .. }),
+            "a memory-rejected disk hit must not be re-enqueued as a keeper piece"
+        );
+        flush_switch.off();
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_flush_on_close() {
         // check without flush on close
 

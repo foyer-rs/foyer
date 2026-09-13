@@ -915,7 +915,9 @@ where
                 if let Some(listener) = self.inner.event_listener.as_ref() {
                     listener.on_leave(Event::Evict, self.record.key(), self.record.value());
                 }
-                if self.pipe.is_enabled() {
+                // A phantom loaded from storage was rejected by the memory filter.
+                // Writing it back would turn every disk hit into another disk write.
+                if self.pipe.is_enabled() && self.source != Source::Disk {
                     self.pipe.send(Piece::new(self.record.clone()));
                 }
                 return;
