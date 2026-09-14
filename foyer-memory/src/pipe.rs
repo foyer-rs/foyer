@@ -31,6 +31,7 @@ pub struct Piece<K, V, P> {
     hash: u64,
     properties: *const P,
     drop_fn: fn(*const ()),
+    flags: *const std::sync::atomic::AtomicU64,
 }
 
 impl<K, V, P> Debug for Piece<K, V, P> {
@@ -73,6 +74,7 @@ impl<K, V, P> Clone for Piece<K, V, P> {
             hash: self.hash,
             properties: self.properties,
             drop_fn: self.drop_fn,
+            flags: self.flags,
         }
     }
 }
@@ -99,6 +101,23 @@ impl<K, V, P> Piece<K, V, P> {
             hash,
             properties,
             drop_fn,
+            flags: unsafe { &(*raw).flags },
+        }
+    }
+
+    /// Whether this record has lost eligibility for deferred storage publication.
+    pub fn is_invalidated(&self) -> bool {
+        unsafe { (*self.flags).load(std::sync::atomic::Ordering::Acquire) }
+        &crate::record::Flags::INVALIDATED.bits() != 0
+    }
+
+    /// Invalidate deferred publication without revoking existing value holders.
+    pub fn invalidate(&self) {
+        unsafe {
+            (*self.flags).fetch_or(
+                crate::record::Flags::INVALIDATED.bits(),
+                std::sync::atomic::Ordering::Release,
+            );
         }
     }
 

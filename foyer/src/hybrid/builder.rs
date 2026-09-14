@@ -342,6 +342,9 @@ where
         };
 
         let storage = builder.build().await?;
+        if storage.is_enabled() {
+            self.memory.track_retired_records();
+        }
 
         let memory = if piped {
             self.memory.with_pipe(Arc::new(HybridCachePipe::new(storage.clone())))

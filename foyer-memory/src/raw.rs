@@ -51,7 +51,7 @@ use crate::{
         RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::{ArcPipe, NoopPipe},
-    record::{Data, Record},
+    record::{Data, Record, RetiredRecords},
 };
 
 /// The weighter for the in-memory cache.
@@ -100,6 +100,7 @@ where
     usage: usize,
     entries: usize,
     capacity: usize,
+    retired: Option<RetiredRecords<E>>,
 
     inflights: Arc<Mutex<InflightManager<E, S, I>>>,
 
@@ -133,6 +134,9 @@ where
             self.entries -= 1;
             self.metrics.memory_entries.decrease(1);
 
+            if let Some(retired) = &mut self.retired {
+                retired.insert(&evicted);
+            }
             garbages.push((Event::Evict, evicted));
         }
     }
@@ -143,12 +147,19 @@ where
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
         notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
-    ) {
-        *notifiers = self
-            .inflights
-            .lock()
-            .take(record.hash(), record.key(), None)
-            .unwrap_or_default();
+        fetch_id: Option<usize>,
+    ) -> bool {
+        let waiting = self.inflights.lock().take(record.hash(), record.key(), fetch_id);
+        if fetch_id.is_some() && waiting.is_none() {
+            return false;
+        }
+        *notifiers = waiting.unwrap_or_default();
+        if fetch_id.is_some() && record.is_invalidated() {
+            return false;
+        }
+        if let Some(retired) = &mut self.retired {
+            retired.invalidate(record.hash(), record.key(), Some(&record));
+        }
 
         // Concurrent fetches can return the same record retained by the disk keeper.
         // Reuse a resident record without unlinking and reinserting it.
@@ -159,7 +170,7 @@ where
                     .is_some_and(|resident| Arc::ptr_eq(resident, &record))
             );
             record.inc_refs(notifiers.len() + 1);
-            return;
+            return true;
         }
 
         if record.properties().phantom().unwrap_or_default() {
@@ -175,12 +186,16 @@ where
                 self.entries -= 1;
                 self.metrics.memory_entries.decrease(1);
 
+                old.invalidate();
                 garbages.push((Event::Replace, old));
             }
             record.inc_refs(notifiers.len() + 1);
+            if let Some(retired) = &mut self.retired {
+                retired.insert(&record);
+            }
             garbages.push((Event::Remove, record));
             self.metrics.memory_insert.increase(1);
-            return;
+            return true;
         }
 
         let weight = record.weight();
@@ -202,6 +217,7 @@ where
 
             self.usage -= old.weight();
 
+            old.invalidate();
             garbages.push((Event::Replace, old));
         } else {
             self.metrics.memory_insert.increase(1);
@@ -224,6 +240,7 @@ where
             std::cmp::Ordering::Less => self.metrics.memory_usage.decrease((old_usage - self.usage) as _),
             std::cmp::Ordering::Equal => {}
         }
+        true
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::shard::remove"))]
@@ -247,6 +264,9 @@ where
         self.metrics.memory_entries.decrease(1);
 
         record.inc_refs(1);
+        if let Some(retired) = &mut self.retired {
+            retired.insert(&record);
+        }
 
         Some(record)
     }
@@ -301,6 +321,9 @@ where
         strict_assert!(record.is_in_indexer());
 
         record.inc_refs(1);
+        if let Some(retired) = &mut self.retired {
+            retired.insert(&record);
+        }
 
         Some(record)
     }
@@ -317,6 +340,9 @@ where
             strict_assert!(!record.is_in_indexer());
             strict_assert!(!record.is_in_eviction());
 
+            if let Some(retired) = &mut self.retired {
+                retired.insert(&record);
+            }
             garbages.push(record);
         }
 
@@ -403,6 +429,9 @@ where
             metrics.memory_usage.decrease(record.weight() as _);
             metrics.memory_entries.decrease(1);
 
+            if let Some(retired) = &mut self.retired {
+                retired.insert(&record);
+            }
             garbages.push((Event::Evict, record));
         }
     }
@@ -506,6 +535,7 @@ where
                 usage: 0,
                 entries: 0,
                 capacity: shard_capacity,
+                retired: None,
                 inflights: Arc::new(Mutex::new(InflightManager::new())),
                 metrics: config.metrics.clone(),
                 _event_listener: config.event_listener.clone(),
@@ -609,6 +639,11 @@ where
         mut properties: E::Properties,
         source: Source,
     ) -> RawCacheEntry<E, S, I> {
+        self.insert_inner(self.make_record(key, value, properties), source, None)
+            .unwrap()
+    }
+
+    fn make_record(&self, key: E::Key, value: E::Value, mut properties: E::Properties) -> Arc<Record<E>> {
         let hash = self.inner.hash_builder.hash_one(&key);
         let weight = (self.inner.weighter)(&key, &value);
         if !(self.inner.filter)(&key, &value) {
@@ -626,23 +661,37 @@ where
             hash,
             weight,
         }));
-        self.insert_inner(record, source)
+        record
     }
 
     #[doc(hidden)]
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_piece"))]
     pub fn insert_piece(&self, piece: Piece<E::Key, E::Value, E::Properties>) -> RawCacheEntry<E, S, I> {
-        self.insert_inner(piece.into_record(), Source::Memory)
+        self.insert_inner(piece.into_record(), Source::Memory, None).unwrap()
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::insert_inner"))]
-    fn insert_inner(&self, record: Arc<Record<E>>, source: Source) -> RawCacheEntry<E, S, I> {
+    fn insert_inner(
+        &self,
+        record: Arc<Record<E>>,
+        source: Source,
+        fetch_id: Option<usize>,
+    ) -> Option<RawCacheEntry<E, S, I>> {
         let mut garbages = vec![];
         let mut notifiers = vec![];
 
-        self.inner.shards[self.shard(record.hash())]
+        let published = self.inner.shards[self.shard(record.hash())]
             .write()
-            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut notifiers));
+            .with(|mut shard| shard.emplace(record.clone(), &mut garbages, &mut notifiers, fetch_id));
+        if !published {
+            for notifier in notifiers {
+                let _ = notifier.send(Err(Error::new(
+                    ErrorKind::TaskCancelled,
+                    "cache entry invalidated during fetch",
+                )));
+            }
+            return None;
+        }
 
         // Notify waiters out of the lock critical section.
         for notifier in notifiers {
@@ -667,12 +716,12 @@ where
             }
         }
 
-        RawCacheEntry {
+        Some(RawCacheEntry {
             record,
             pipe: self.pipe.clone(),
             inner: self.inner.clone(),
             source,
-        }
+        })
     }
 
     /// Evict all entries in the cache and offload them into the disk cache via the pipe if needed.
@@ -731,24 +780,59 @@ where
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
-        let hash = self.inner.hash_builder.hash_one(key);
+        self.remove_inner(key, || {}, false)
+    }
 
-        self.inner.shards[self.shard(hash)]
-            .write()
-            .with(|mut shard| {
-                shard.remove(hash, key).map(|record| RawCacheEntry {
-                    pipe: self.pipe.clone(),
-                    inner: self.inner.clone(),
-                    record,
-                    source: Source::Memory,
-                })
-            })
-            .inspect(|record| {
-                // Deallocate data out of the lock critical section.
-                if let Some(listener) = self.inner.event_listener.as_ref() {
-                    listener.on_leave(Event::Remove, record.key(), record.value());
+    pub fn invalidate<Q>(&self, key: &Q, action: impl FnOnce())
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+    {
+        self.remove_inner(key, action, true);
+    }
+
+    fn remove_inner<Q>(&self, key: &Q, action: impl FnOnce(), invalidate: bool) -> Option<RawCacheEntry<E, S, I>>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized,
+    {
+        let hash = self.inner.hash_builder.hash_one(key);
+        let (record, notifiers) = {
+            let mut shard = self.inner.shards[self.shard(hash)].write();
+            let record = shard.remove(hash, key);
+            if invalidate {
+                if let Some(record) = &record {
+                    record.invalidate();
                 }
-            })
+                if let Some(retired) = &mut shard.retired {
+                    retired.invalidate(hash, key, None);
+                }
+            }
+            let notifiers = shard.inflights.lock().take(hash, key, None).unwrap_or_default();
+            action();
+            (record, notifiers)
+        };
+        for notifier in notifiers {
+            let _ = notifier.send(Err(Error::new(
+                ErrorKind::TaskCancelled,
+                "cache entry removed during fetch",
+            )));
+        }
+        record.map(|record| {
+            if let Some(listener) = self.inner.event_listener.as_ref() {
+                listener.on_leave(Event::Remove, record.key(), record.value());
+            }
+            RawCacheEntry {
+                pipe: self.pipe.clone(),
+                inner: self.inner.clone(),
+                record,
+                source: Source::Memory,
+            }
+        })
+    }
+
+    pub fn track_retired_records(&self) {
+        for shard in &self.inner.shards {
+            shard.write().retired.get_or_insert_with(Default::default);
+        }
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::get"))]
@@ -1377,7 +1461,7 @@ where
                     match optional_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(Some(target))) => {
-                            handle_try! {*this.state, handle_target(target, this.key, this.cache, Source::Disk) }
+                            handle_try! {*this.state, handle_target(target, this.key, this.cache, Source::Disk, *this.id) }
                         }
                         Poll::Ready(Ok(None)) => {
                             handle_try! { *this.state, try_set_required(required_fetch_builder, this.ctx, *this.id, *this.hash, this.key.as_ref().unwrap(), &this.inflights, Ok(None)) }
@@ -1394,7 +1478,7 @@ where
                     match required_fetch.poll_unpin(cx) {
                         Poll::Pending => return Poll::Pending,
                         Poll::Ready(Ok(target)) => {
-                            handle_try! { *this.state, handle_target(target, this.key, this.cache, Source::Outer) }
+                            handle_try! { *this.state, handle_target(target, this.key, this.cache, Source::Outer, *this.id) }
                         }
                         Poll::Ready(Err(e)) => {
                             handle_try! { *this.state, handle_error(e, *this.id, *this.hash, this.key.as_ref().unwrap(), this.inflights) }
@@ -1475,16 +1559,13 @@ where
         key: &mut Once<E::Key>,
         cache: &RawCache<E, S, I>,
         source: Source,
+        id: usize,
     ) -> Try<E, S, I, C> {
-        match target {
-            FetchTarget::Entry { value, properties } => {
-                let key = key.take().unwrap();
-                cache.insert_with_properties_inner(key, value, properties, source);
-            }
-            FetchTarget::Piece(piece) => {
-                cache.insert_piece(piece);
-            }
-        }
+        let record = match target {
+            FetchTarget::Entry { value, properties } => cache.make_record(key.take().unwrap(), value, properties),
+            FetchTarget::Piece(piece) => piece.into_record(),
+        };
+        cache.insert_inner(record, source, Some(id));
         Try::Ready
     }
 

@@ -758,6 +758,34 @@ where
         }
     }
 
+    /// Invalidate memory and execute a synchronous storage invalidation while publication is excluded.
+    /// The action must not reenter this cache or wait for I/O.
+    #[doc(hidden)]
+    pub fn invalidate<Q>(&self, key: &Q, action: impl FnOnce())
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.invalidate(key, action),
+            Cache::S3Fifo(cache) => cache.invalidate(key, action),
+            Cache::Lru(cache) => cache.invalidate(key, action),
+            Cache::Lfu(cache) => cache.invalidate(key, action),
+            Cache::Sieve(cache) => cache.invalidate(key, action),
+        }
+    }
+
+    /// Track evicted records that may still be published through a storage pipe.
+    #[doc(hidden)]
+    pub fn track_retired_records(&self) {
+        match self {
+            Cache::Fifo(cache) => cache.track_retired_records(),
+            Cache::S3Fifo(cache) => cache.track_retired_records(),
+            Cache::Lru(cache) => cache.track_retired_records(),
+            Cache::Lfu(cache) => cache.track_retired_records(),
+            Cache::Sieve(cache) => cache.track_retired_records(),
+        }
+    }
+
     /// Get cached entry with the given key from the in-memory cache.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::get"))]
     pub fn get<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>

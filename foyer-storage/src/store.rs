@@ -23,6 +23,7 @@ use foyer_common::{
     spawn::Spawner,
 };
 use foyer_memory::{Cache, Piece};
+use parking_lot::Mutex;
 
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
@@ -62,6 +63,8 @@ where
     hasher: Arc<S>,
 
     keeper: Keeper<K, V, P>,
+    // Serialize enqueue registration with invalidation, never storage I/O.
+    mutations: Vec<Mutex<()>>,
     engine: Arc<dyn Engine<K, V, P>>,
 
     compression: Compression,
@@ -129,6 +132,10 @@ where
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
+        let guard = self.inner.mutations[piece.hash() as usize % self.inner.mutations.len()].lock();
+        if piece.is_invalidated() {
+            return;
+        }
         if force
             || self
                 .filter(
@@ -141,9 +148,10 @@ where
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
         } else {
-            self.delete(piece.key());
+            self.delete_inner(piece.hash(), piece.key());
         }
 
+        drop(guard);
         self.inner.metrics.storage_enqueue.increase(1);
         self.inner
             .metrics
@@ -243,13 +251,22 @@ where
         let now = Instant::now();
 
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.delete(hash);
+        let _guard = self.inner.mutations[hash as usize % self.inner.mutations.len()].lock();
+        self.delete_inner(hash, key);
 
         self.inner.metrics.storage_delete.increase(1);
         self.inner
             .metrics
             .storage_delete_duration
             .record(now.elapsed().as_secs_f64());
+    }
+
+    fn delete_inner<Q>(&self, hash: u64, key: &Q)
+    where
+        Q: Hash + Equivalent<K> + ?Sized,
+    {
+        self.inner.keeper.remove(hash, key);
+        self.inner.engine.delete(hash);
     }
 
     /// Check if the disk cache contains a cached entry with the given key.
@@ -493,6 +510,7 @@ where
         let inner = StoreInner {
             hasher,
             keeper,
+            mutations: (0..memory.shards()).map(|_| Mutex::new(())).collect(),
             engine,
             compression,
             spawner,

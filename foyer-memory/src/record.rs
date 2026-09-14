@@ -27,6 +27,7 @@ bitflags! {
     pub struct Flags: u64 {
         const IN_INDEXER = 0b00000001;
         const IN_EVICTION = 0b00000010;
+        const INVALIDATED = 0b00000100;
     }
 }
 
@@ -50,7 +51,7 @@ where
     state: UnsafeCell<E::State>,
     /// Reference count used in the in-memory cache.
     refs: AtomicUsize,
-    flags: AtomicU64,
+    pub(crate) flags: AtomicU64,
 }
 
 unsafe impl<E> Send for Record<E> where E: Eviction {}
@@ -134,6 +135,14 @@ where
         self.get_flags(Flags::IN_INDEXER, Ordering::Acquire)
     }
 
+    pub(crate) fn invalidate(&self) {
+        self.set_flags(Flags::INVALIDATED, true, Ordering::Release);
+    }
+
+    pub(crate) fn is_invalidated(&self) -> bool {
+        self.get_flags(Flags::INVALIDATED, Ordering::Acquire)
+    }
+
     /// Set the record atomic flags.
     pub fn set_flags(&self, flags: Flags, val: bool, order: Ordering) {
         match val {
@@ -178,5 +187,55 @@ where
             old - val
         );
         old - val
+    }
+}
+
+/// Weak references preserve invalidation across eviction and a delayed pipe handoff.
+/// Dead records are swept geometrically; the table does not retain payloads.
+pub(crate) struct RetiredRecords<E: Eviction> {
+    records: hashbrown::HashTable<(u64, std::sync::Weak<Record<E>>)>,
+    sweep_at: usize,
+}
+
+impl<E: Eviction> Default for RetiredRecords<E> {
+    fn default() -> Self {
+        Self {
+            records: Default::default(),
+            sweep_at: 64,
+        }
+    }
+}
+
+impl<E: Eviction> RetiredRecords<E> {
+    pub fn insert(&mut self, record: &std::sync::Arc<Record<E>>) {
+        if record.is_invalidated() {
+            return;
+        }
+        if self.records.len() >= self.sweep_at {
+            self.records.retain(|(_, weak)| weak.strong_count() != 0);
+            self.sweep_at = self.records.len().saturating_mul(2).saturating_add(64);
+        }
+        self.invalidate(record.hash(), record.key(), Some(record));
+        self.records.insert_unique(
+            record.hash(),
+            (record.hash(), std::sync::Arc::downgrade(record)),
+            |(hash, _)| *hash,
+        );
+    }
+
+    pub fn invalidate<Q>(&mut self, hash: u64, key: &Q, except: Option<&std::sync::Arc<Record<E>>>)
+    where
+        Q: equivalent::Equivalent<E::Key> + ?Sized,
+    {
+        if let Ok(entry) = self.records.find_entry(hash, |(_, weak)| {
+            weak.upgrade().is_some_and(|record| key.equivalent(record.key()))
+        }) {
+            let ((_, weak), _) = entry.remove();
+            if let Some(record) = weak.upgrade() {
+                if !except.is_some_and(|new| std::sync::Arc::ptr_eq(new, &record)) {
+                    record.invalidate();
+                }
+            }
+        }
     }
 }

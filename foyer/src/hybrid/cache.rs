@@ -583,8 +583,7 @@ where
 
         let now = Instant::now();
 
-        self.inner.memory.remove(key);
-        self.inner.storage.delete(key);
+        self.inner.memory.invalidate(key, || self.inner.storage.delete(key));
 
         self.inner.metrics.hybrid_remove.increase(1);
         self.inner
