@@ -636,7 +636,7 @@ where
         &self,
         key: E::Key,
         value: E::Value,
-        mut properties: E::Properties,
+        properties: E::Properties,
         source: Source,
     ) -> RawCacheEntry<E, S, I> {
         self.insert_inner(self.make_record(key, value, properties), source, None)
@@ -654,14 +654,13 @@ where
         {
             properties = properties.with_phantom(true);
         }
-        let record = Arc::new(Record::new(Data {
+        Arc::new(Record::new(Data {
             key,
             value,
             properties,
             hash,
             weight,
-        }));
-        record
+        }))
     }
 
     #[doc(hidden)]
@@ -1561,9 +1560,11 @@ where
         source: Source,
         id: usize,
     ) -> Try<E, S, I, C> {
-        let record = match target {
-            FetchTarget::Entry { value, properties } => cache.make_record(key.take().unwrap(), value, properties),
-            FetchTarget::Piece(piece) => piece.into_record(),
+        let (record, source) = match target {
+            FetchTarget::Entry { value, properties } => {
+                (cache.make_record(key.take().unwrap(), value, properties), source)
+            }
+            FetchTarget::Piece(piece) => (piece.into_record(), Source::Memory),
         };
         cache.insert_inner(record, source, Some(id));
         Try::Ready
