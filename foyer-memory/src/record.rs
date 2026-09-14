@@ -231,10 +231,10 @@ impl<E: Eviction> RetiredRecords<E> {
             weak.upgrade().is_some_and(|record| key.equivalent(record.key()))
         }) {
             let ((_, weak), _) = entry.remove();
-            if let Some(record) = weak.upgrade() {
-                if !except.is_some_and(|new| std::sync::Arc::ptr_eq(new, &record)) {
-                    record.invalidate();
-                }
+            if let Some(record) = weak.upgrade()
+                && !except.is_some_and(|new| std::sync::Arc::ptr_eq(new, &record))
+            {
+                record.invalidate();
             }
         }
     }

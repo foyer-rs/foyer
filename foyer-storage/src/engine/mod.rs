@@ -166,6 +166,9 @@ where
     fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult;
 
     /// Push a in-memory cache piece to the disk cache write queue.
+    ///
+    /// This method must not wait for I/O or reenter the hybrid cache. Publication
+    /// registration is serialized with deletion by the store.
     fn enqueue(&self, piece: PieceRef<K, V, P>, estimated_size: usize);
 
     /// Load a cache entry from the disk cache.

@@ -132,18 +132,20 @@ where
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
-        let guard = self.inner.mutations[piece.hash() as usize % self.inner.mutations.len()].lock();
-        if piece.is_invalidated() {
-            return;
-        }
-        if force
+        // Admission filters may call user code. Run them before taking the
+        // publication lock, then recheck the record's invalidation state.
+        let admitted = force
             || self
                 .filter(
                     piece.hash(),
                     piece.key().estimated_size() + piece.value().estimated_size(),
                 )
-                .is_admitted()
-        {
+                .is_admitted();
+        let guard = self.inner.mutations[piece.hash() as usize % self.inner.mutations.len()].lock();
+        if piece.is_invalidated() {
+            return;
+        }
+        if admitted {
             let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
