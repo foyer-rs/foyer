@@ -321,9 +321,6 @@ where
         strict_assert!(record.is_in_indexer());
 
         record.inc_refs(1);
-        if let Some(retired) = &mut self.retired {
-            retired.insert(&record);
-        }
 
         Some(record)
     }

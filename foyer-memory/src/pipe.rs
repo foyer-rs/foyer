@@ -107,8 +107,8 @@ impl<K, V, P> Piece<K, V, P> {
 
     /// Whether this record has lost eligibility for deferred storage publication.
     pub fn is_invalidated(&self) -> bool {
-        unsafe { (*self.flags).load(std::sync::atomic::Ordering::Acquire) }
-        &crate::record::Flags::INVALIDATED.bits() != 0
+        (unsafe { (*self.flags).load(std::sync::atomic::Ordering::Acquire) } & crate::record::Flags::INVALIDATED.bits())
+            != 0
     }
 
     /// Invalidate deferred publication without revoking existing value holders.
