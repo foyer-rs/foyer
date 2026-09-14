@@ -148,7 +148,15 @@ where
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
         } else {
-            self.delete_inner(piece.hash(), piece.key());
+            // Preserve delete accounting without recursively taking the mutation lock.
+            let delete_start = Instant::now();
+            let hash = self.inner.hasher.hash_one(piece.key());
+            self.delete_inner(hash, piece.key());
+            self.inner.metrics.storage_delete.increase(1);
+            self.inner
+                .metrics
+                .storage_delete_duration
+                .record(delete_start.elapsed().as_secs_f64());
         }
 
         drop(guard);
