@@ -744,6 +744,10 @@ where
     }
 
     /// Remove a cached entry with the given key from the in-memory cache.
+    ///
+    /// Also cancel the current fetch group for this key. Its waiters receive
+    /// [`ErrorKind::TaskCancelled`], and a late result cannot replace a newer entry.
+    /// Existing entry holders remain usable.
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::remove"))]
     pub fn remove<Q>(&self, key: &Q) -> Option<CacheEntry<K, V, S, P>>
     where

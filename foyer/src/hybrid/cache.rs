@@ -572,6 +572,12 @@ where
     }
 
     /// Remove a cached entry with the given key from the hybrid cache.
+    ///
+    /// On return, subsequent reads cannot join an older fetch or load the removed
+    /// entry from the write queue. In-flight fetch waiters receive
+    /// [`ErrorKind::TaskCancelled`]; their results cannot repopulate the cache.
+    /// Existing entry holders remain usable. Physical storage reclamation is
+    /// asynchronous; this operation does not promise durability across recovery.
     pub fn remove<Q>(&self, key: &Q)
     where
         Q: Hash + Equivalent<K> + ?Sized + Send + Sync + 'static,

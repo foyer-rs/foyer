@@ -175,6 +175,10 @@ where
     fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<K, V, P>>>;
 
     /// Delete the cache entry with the given key from the disk cache.
+    ///
+    /// Invalidate the lookup index before returning and prevent previously queued
+    /// writes from republishing the deleted entry. Physical reclamation may be
+    /// asynchronous. This method must not wait for I/O or reenter the hybrid cache.
     fn delete(&self, hash: u64);
 
     /// Check if the disk cache contains a cached entry with the given key.
