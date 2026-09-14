@@ -569,13 +569,15 @@ mod tests {
             done_tx.send(()).unwrap();
         });
         let wait_until_parked = || {
+            let mut parked = false;
             for _ in 0..1000 {
                 if state.parked.load(Ordering::Acquire) {
-                    return;
+                    parked = true;
+                    break;
                 }
                 thread::sleep(Duration::from_millis(1));
             }
-            panic!("uring shard did not park while idle");
+            assert!(parked, "uring shard did not park while idle");
         };
         wait_until_parked();
 
@@ -601,5 +603,44 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("uring shard did not exit after engine drop");
         worker.join().unwrap();
+    }
+
+    fn shard(
+        read_rx: mpsc::Receiver<UringIoCtx>,
+        write_rx: mpsc::Receiver<UringIoCtx>,
+        read_inflight: usize,
+        write_inflight: usize,
+    ) -> UringIoEngineShard {
+        UringIoEngineShard {
+            read_rx,
+            write_rx,
+            weight: 1.0,
+            uring: IoUring::builder().build(1).unwrap(),
+            io_depth: 1,
+            read_inflight,
+            write_inflight,
+            state: Arc::new(UringIoEngineShardState::default()),
+        }
+    }
+
+    #[test]
+    fn try_recv_reports_disconnected_channels() {
+        // Read first: the read channel is disconnected.
+        let (read_tx, read_rx) = mpsc::sync_channel(1);
+        let (_write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(read_tx);
+        assert!(shard(read_rx, write_rx, 0, 1).try_recv().is_err());
+
+        // Read first: the read channel is empty and the write channel is disconnected.
+        let (_read_tx, read_rx) = mpsc::sync_channel(1);
+        let (write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(write_tx);
+        assert!(shard(read_rx, write_rx, 0, 1).try_recv().is_err());
+
+        // Write first: the write channel is empty and the read channel is disconnected.
+        let (read_tx, read_rx) = mpsc::sync_channel(1);
+        let (_write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(read_tx);
+        assert!(shard(read_rx, write_rx, 1, 0).try_recv().is_err());
     }
 }
