@@ -14,7 +14,12 @@
 
 use std::{
     fmt::Debug,
-    sync::{Arc, mpsc},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    thread::Thread,
 };
 
 use asyncband::oneshot;
@@ -199,6 +204,7 @@ impl IoEngineConfig for UringIoEngineConfig {
                 })
                 .unzip();
 
+            let mut states = Vec::with_capacity(self.threads);
             for (i, (read_rx, write_rx)) in read_rxs.into_iter().zip(write_rxs).enumerate() {
                 let mut builder = IoUring::builder();
                 if self.iopoll {
@@ -221,7 +227,9 @@ impl IoEngineConfig for UringIoEngineConfig {
                     weight: self.weight,
                     read_inflight: 0,
                     write_inflight: 0,
+                    state: Default::default(),
                 };
+                states.push(shard.state.clone());
 
                 std::thread::Builder::new()
                     .name(format!("foyer-uring-{i}"))
@@ -229,12 +237,17 @@ impl IoEngineConfig for UringIoEngineConfig {
                         if let Some(cpu) = cpu {
                             core_affinity::set_for_current(CoreId { id: cpu as _ });
                         }
+                        shard.state.thread.set(std::thread::current()).unwrap();
                         shard.run();
                     })
                     .map_err(Error::io_error)?;
             }
 
-            let engine = UringIoEngine { read_txs, write_txs };
+            let engine = UringIoEngine {
+                read_txs,
+                write_txs,
+                states,
+            };
             let engine = Arc::new(engine);
             Ok(engine as Arc<dyn IoEngine>)
         }
@@ -270,6 +283,20 @@ struct UringIoCtx {
     span: fastrace::Span,
 }
 
+#[derive(Default)]
+struct UringIoEngineShardState {
+    parked: AtomicBool,
+    thread: OnceLock<Thread>,
+}
+
+impl UringIoEngineShardState {
+    fn unpark(&self) {
+        if self.parked.swap(false, Ordering::AcqRel) {
+            self.thread.get().unwrap().unpark();
+        }
+    }
+}
+
 struct UringIoEngineShard {
     read_rx: mpsc::Receiver<UringIoCtx>,
     write_rx: mpsc::Receiver<UringIoCtx>,
@@ -278,36 +305,48 @@ struct UringIoEngineShard {
     io_depth: usize,
     read_inflight: usize,
     write_inflight: usize,
+    state: Arc<UringIoEngineShardState>,
 }
 
 impl UringIoEngineShard {
+    fn try_recv(&self) -> std::result::Result<Option<UringIoCtx>, ()> {
+        if (self.read_inflight as f64) < self.write_inflight as f64 * self.weight {
+            match self.read_rx.try_recv() {
+                Err(mpsc::TryRecvError::Disconnected) => Err(()),
+                Ok(ctx) => Ok(Some(ctx)),
+                Err(mpsc::TryRecvError::Empty) => match self.write_rx.try_recv() {
+                    Err(mpsc::TryRecvError::Disconnected) => Err(()),
+                    Ok(ctx) => Ok(Some(ctx)),
+                    Err(mpsc::TryRecvError::Empty) => Ok(None),
+                },
+            }
+        } else {
+            match self.write_rx.try_recv() {
+                Err(mpsc::TryRecvError::Disconnected) => Err(()),
+                Ok(ctx) => Ok(Some(ctx)),
+                Err(mpsc::TryRecvError::Empty) => match self.read_rx.try_recv() {
+                    Err(mpsc::TryRecvError::Disconnected) => Err(()),
+                    Ok(ctx) => Ok(Some(ctx)),
+                    Err(mpsc::TryRecvError::Empty) => Ok(None),
+                },
+            }
+        }
+    }
+
     fn run(mut self) {
+        let mut pending = None;
         loop {
             'prepare: loop {
                 if self.read_inflight + self.write_inflight >= self.io_depth {
                     break 'prepare;
                 }
 
-                let ctx = if (self.read_inflight as f64) < self.write_inflight as f64 * self.weight {
-                    match self.read_rx.try_recv() {
-                        Err(mpsc::TryRecvError::Disconnected) => return,
-                        Ok(ctx) => Some(ctx),
-                        Err(mpsc::TryRecvError::Empty) => match self.write_rx.try_recv() {
-                            Err(mpsc::TryRecvError::Disconnected) => return,
-                            Ok(ctx) => Some(ctx),
-                            Err(mpsc::TryRecvError::Empty) => None,
-                        },
-                    }
-                } else {
-                    match self.write_rx.try_recv() {
-                        Err(mpsc::TryRecvError::Disconnected) => return,
-                        Ok(ctx) => Some(ctx),
-                        Err(mpsc::TryRecvError::Empty) => match self.read_rx.try_recv() {
-                            Err(mpsc::TryRecvError::Disconnected) => return,
-                            Ok(ctx) => Some(ctx),
-                            Err(mpsc::TryRecvError::Empty) => None,
-                        },
-                    }
+                let ctx = match pending.take() {
+                    Some(ctx) => Some(ctx),
+                    None => match self.try_recv() {
+                        Err(()) => return,
+                        Ok(ctx) => ctx,
+                    },
                 };
 
                 let ctx = match ctx {
@@ -361,6 +400,16 @@ impl UringIoEngineShard {
                 #[cfg(feature = "tracing")]
                 drop(ctx.span);
             }
+
+            if self.read_inflight + self.write_inflight == 0 {
+                self.state.parked.store(true, Ordering::Release);
+                match self.try_recv() {
+                    Err(()) => return,
+                    Ok(Some(ctx)) => pending = Some(ctx),
+                    Ok(None) => std::thread::park(),
+                }
+                self.state.parked.store(false, Ordering::Release);
+            }
         }
     }
 }
@@ -369,6 +418,17 @@ impl UringIoEngineShard {
 pub struct UringIoEngine {
     read_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
     write_txs: Vec<mpsc::SyncSender<UringIoCtx>>,
+    states: Vec<Arc<UringIoEngineShardState>>,
+}
+
+impl Drop for UringIoEngine {
+    fn drop(&mut self) {
+        self.read_txs.clear();
+        self.write_txs.clear();
+        for state in &self.states {
+            state.unpark();
+        }
+    }
 }
 
 impl Debug for UringIoEngine {
@@ -378,27 +438,37 @@ impl Debug for UringIoEngine {
 }
 
 impl UringIoEngine {
+    fn submit(&self, partition: &dyn Partition, ctx: UringIoCtx) {
+        let shard = partition.id() as usize % self.read_txs.len();
+        let tx = match ctx.io_type {
+            UringIoType::Read => &self.read_txs[shard],
+            UringIoType::Write => &self.write_txs[shard],
+        };
+        let _ = tx.send(ctx);
+        self.states[shard].unpark();
+    }
+
     #[cfg_attr(
         feature = "tracing",
         fastrace::trace(name = "foyer::storage::io::engine::uring::read")
     )]
     fn read(&self, buf: Box<dyn IoBufMut>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.read_txs[partition.id() as usize % self.read_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
         #[cfg(feature = "tracing")]
         let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::read::io");
-        let _ = shard.send(UringIoCtx {
+        let ctx = UringIoCtx {
             tx,
             io_type: UringIoType::Read,
             rbuf,
             addr,
             #[cfg(feature = "tracing")]
             span,
-        });
+        };
+        self.submit(partition, ctx);
         async move {
             let res = match rx.await {
                 Ok(res) => res,
@@ -417,21 +487,21 @@ impl UringIoEngine {
     )]
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         let (tx, rx) = oneshot::channel();
-        let shard = &self.write_txs[partition.id() as usize % self.write_txs.len()];
         let (ptr, len) = buf.as_raw_parts();
         let rbuf = RawBuf { ptr, len };
         let (file, offset) = partition.translate(offset);
         let addr = RawFileAddress { file, offset };
         #[cfg(feature = "tracing")]
         let span = Span::enter_with_local_parent("foyer::storage::io::engine::uring::write::io");
-        let _ = shard.send(UringIoCtx {
+        let ctx = UringIoCtx {
             tx,
             io_type: UringIoType::Write,
             rbuf,
             addr,
             #[cfg(feature = "tracing")]
             span,
-        });
+        };
+        self.submit(partition, ctx);
         async move {
             let res = match rx.await {
                 Ok(res) => res,
@@ -452,5 +522,125 @@ impl IoEngine for UringIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         self.write(buf, partition, offset)
+    }
+}
+
+#[cfg(all(test, target_os = "linux", not(madsim)))]
+mod tests {
+    use std::{
+        sync::{Arc, atomic::Ordering, mpsc},
+        thread,
+        time::Duration,
+    };
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::io::{
+        bytes::Raw,
+        device::{DeviceBuilder, file::FileDeviceBuilder},
+    };
+
+    #[test_log::test(tokio::test)]
+    async fn idle_shard_wakes_for_io() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("uring_idle_wake");
+        let device = FileDeviceBuilder::new(&path).with_capacity(4096).build().unwrap();
+        let partition = device.create_partition(4096).unwrap();
+
+        let (read_tx, read_rx) = mpsc::sync_channel(4096);
+        let (write_tx, write_rx) = mpsc::sync_channel(4096);
+        let state = Arc::new(UringIoEngineShardState::default());
+        let shard = UringIoEngineShard {
+            read_rx,
+            write_rx,
+            weight: 1.0,
+            uring: IoUring::builder().build(1).unwrap(),
+            io_depth: 1,
+            read_inflight: 0,
+            write_inflight: 0,
+            state: state.clone(),
+        };
+        let worker_state = state.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            worker_state.thread.set(thread::current()).unwrap();
+            shard.run();
+            done_tx.send(()).unwrap();
+        });
+        let wait_until_parked = || {
+            let mut parked = false;
+            for _ in 0..1000 {
+                if state.parked.load(Ordering::Acquire) {
+                    parked = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(parked, "uring shard did not park while idle");
+        };
+        wait_until_parked();
+
+        let mut write_buf = Raw::new(4096);
+        write_buf.fill(0x5a);
+        let engine = UringIoEngine {
+            read_txs: vec![read_tx],
+            write_txs: vec![write_tx],
+            states: vec![state.clone()],
+        };
+        let (_, result) = engine.write(Box::new(write_buf), partition.as_ref(), 0).await;
+        result.unwrap();
+
+        wait_until_parked();
+        let read_buf = Raw::new(4096);
+        let (read_buf, result) = engine.read(Box::new(read_buf), partition.as_ref(), 0).await;
+        result.unwrap();
+        assert!(read_buf.iter().all(|byte| *byte == 0x5a));
+
+        wait_until_parked();
+        drop(engine);
+        done_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("uring shard did not exit after engine drop");
+        worker.join().unwrap();
+    }
+
+    fn shard(
+        read_rx: mpsc::Receiver<UringIoCtx>,
+        write_rx: mpsc::Receiver<UringIoCtx>,
+        read_inflight: usize,
+        write_inflight: usize,
+    ) -> UringIoEngineShard {
+        UringIoEngineShard {
+            read_rx,
+            write_rx,
+            weight: 1.0,
+            uring: IoUring::builder().build(1).unwrap(),
+            io_depth: 1,
+            read_inflight,
+            write_inflight,
+            state: Arc::new(UringIoEngineShardState::default()),
+        }
+    }
+
+    #[test]
+    fn try_recv_reports_disconnected_channels() {
+        // Read first: the read channel is disconnected.
+        let (read_tx, read_rx) = mpsc::sync_channel(1);
+        let (_write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(read_tx);
+        assert!(shard(read_rx, write_rx, 0, 1).try_recv().is_err());
+
+        // Read first: the read channel is empty and the write channel is disconnected.
+        let (_read_tx, read_rx) = mpsc::sync_channel(1);
+        let (write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(write_tx);
+        assert!(shard(read_rx, write_rx, 0, 1).try_recv().is_err());
+
+        // Write first: the write channel is empty and the read channel is disconnected.
+        let (read_tx, read_rx) = mpsc::sync_channel(1);
+        let (_write_tx, write_rx) = mpsc::sync_channel(1);
+        drop(read_tx);
+        assert!(shard(read_rx, write_rx, 1, 0).try_recv().is_err());
     }
 }
