@@ -165,6 +165,21 @@ impl BufferEntryInfo {
     }
 }
 
+/// The result of pushing an entry into a [`Buffer`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Push {
+    /// The entry is written into the buffer.
+    Ok,
+    /// The entry doesn't fit the remaining space of the buffer.
+    ///
+    /// The entry can still be written after the buffer is rotated. But if the buffer that rejects the entry is already
+    /// empty, the entry is larger than the whole buffer, therefore it can never be written.
+    NoSpace,
+    /// The entry can never be written into a buffer, e.g. it is larger than the max entry size, or it fails to be
+    /// serialized.
+    Unstorable,
+}
+
 #[derive(Debug)]
 pub struct Buffer {
     bytes: IoSliceMut,
@@ -191,7 +206,7 @@ impl Buffer {
         self.entry_infos.is_empty()
     }
 
-    pub fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: Compression, sequence: Sequence) -> bool
+    pub fn push<K, V>(&mut self, key: &K, value: &V, hash: u64, compression: Compression, sequence: Sequence) -> Push
     where
         K: StorageKey,
         V: StorageValue,
@@ -201,9 +216,9 @@ impl Buffer {
         let offset = self.written;
         let buf = &mut self.bytes[offset..];
 
-        // If there is no space even for entry header, skip
+        // If there is no space even for entry header, the entry needs a rotated buffer.
         if buf.len() < EntryHeader::serialized_len() {
-            return false;
+            return Push::NoSpace;
         }
 
         let ser = Instant::now();
@@ -211,11 +226,14 @@ impl Buffer {
         let info = match EntrySerializer::serialize(key, value, compression, &mut buf[EntryHeader::serialized_len()..])
         {
             Ok(info) => info,
+            Err(e) if e.kind() == ErrorKind::BufferSizeLimit => {
+                // The entry doesn't fit the remaining space of the buffer, it needs a rotated buffer.
+                tracing::trace!(hash, ?e, "[blob writer]: no space left for the entry in the buffer");
+                return Push::NoSpace;
+            }
             Err(e) => {
-                if e.kind() != ErrorKind::BufferSizeLimit {
-                    tracing::warn!(?e, "[blob writer]: serialize entry kv error");
-                }
-                return false;
+                tracing::warn!(?e, "[blob writer]: serialize entry kv error");
+                return Push::Unstorable;
             }
         };
         let checksum = Checksummer::checksum64(
@@ -240,7 +258,7 @@ impl Buffer {
         let aligned = bits::align_up(PAGE, len);
 
         if aligned > self.max_entry_size {
-            return false;
+            return Push::Unstorable;
         }
 
         let info = BufferEntryInfo {
@@ -254,11 +272,11 @@ impl Buffer {
 
         tracing::trace!(hash, "[blob writer]: push finish");
 
-        true
+        Push::Ok
     }
 
     /// Serialize an serialized kv entry slice into the dest.
-    pub fn push_slice(&mut self, slice: &[u8], hash: u64, sequence: Sequence) -> bool {
+    pub fn push_slice(&mut self, slice: &[u8], hash: u64, sequence: Sequence) -> Push {
         tracing::trace!(hash, "[blob writer]: push slice");
 
         let offset = self.written;
@@ -267,8 +285,12 @@ impl Buffer {
         let len = slice.len();
         let aligned = bits::align_up(PAGE, slice.len());
 
-        if aligned > self.max_entry_size || aligned > buf.len() {
-            return false;
+        if aligned > self.max_entry_size {
+            return Push::Unstorable;
+        }
+
+        if aligned > buf.len() {
+            return Push::NoSpace;
         }
 
         buf[..slice.len()].copy_from_slice(slice);
@@ -284,7 +306,7 @@ impl Buffer {
 
         tracing::trace!(hash, "[blob writer]: push slice finish");
 
-        true
+        Push::Ok
     }
 
     pub fn finish(self) -> (IoSliceMut, Vec<BufferEntryInfo>) {
@@ -494,6 +516,8 @@ mod tests {
     use super::*;
 
     const KB: usize = 1024;
+    /// A 3 KiB entry is serialized into a bit more than 3 KiB, so it takes exactly one page.
+    const ONE_PAGE_ENTRY_VALUE_SIZE: usize = 3 * KB;
 
     #[test_log::test]
     fn test_blob_index_serde() {
@@ -532,13 +556,22 @@ mod tests {
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K
-        assert!(buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, 1));
+        assert_eq!(
+            buffer.push(&1u64, &vec![1u8; 3 * KB], 1, Compression::None, 1),
+            Push::Ok
+        );
 
         // 16K (deny)
-        assert!(!buffer.push(&2u64, &vec![2u8; 13 * KB], 2, Compression::None, 2));
+        assert_eq!(
+            buffer.push(&2u64, &vec![2u8; 13 * KB], 2, Compression::None, 2),
+            Push::Unstorable
+        );
 
         // 4K
-        assert!(buffer.push(&3u64, &vec![3u8; 3 * KB], 3, Compression::None, 3));
+        assert_eq!(
+            buffer.push(&3u64, &vec![3u8; 3 * KB], 3, Compression::None, 3),
+            Push::Ok
+        );
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_io_slice();
@@ -578,13 +611,22 @@ mod tests {
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 4K, block split
-        assert!(buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4));
+        assert_eq!(
+            buffer.push(&4u64, &vec![4u8; 3 * KB], 4, Compression::None, 4),
+            Push::Ok
+        );
 
         // 8K
-        assert!(buffer.push(&5u64, &vec![5u8; 7 * KB], 5, Compression::None, 5));
+        assert_eq!(
+            buffer.push(&5u64, &vec![5u8; 7 * KB], 5, Compression::None, 5),
+            Push::Ok
+        );
 
         // 8K, block early split
-        assert!(buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, 6));
+        assert_eq!(
+            buffer.push(&6u64, &vec![6u8; 7 * KB], 6, Compression::None, 6),
+            Push::Ok
+        );
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_io_slice();
@@ -646,7 +688,10 @@ mod tests {
         let mut buffer = Buffer::new(IoSliceMut::new(BATCH_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
 
         // 8K, block split
-        assert!(buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7));
+        assert_eq!(
+            buffer.push(&7u64, &vec![7u8; 7 * KB], 7, Compression::None, 7),
+            Push::Ok
+        );
 
         let (buf, infos) = buffer.finish();
         let buf = buf.into_io_slice();
@@ -675,6 +720,85 @@ mod tests {
                 ]
             }
         );
+    }
+
+    #[test_log::test]
+    fn test_push_no_space_or_unstorable() {
+        const BLOCK_SIZE: usize = 16 * KB;
+        const BLOB_INDEX_SIZE: usize = 4 * KB;
+        const MAX_ENTRY_SIZE: usize = BLOCK_SIZE - BLOB_INDEX_SIZE;
+        const BUFFER_SIZE: usize = 16 * KB;
+
+        let buffer = || Buffer::new(IoSliceMut::new(BUFFER_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        let fill = |buffer: &mut Buffer, count: u64| {
+            for i in 0..count {
+                assert_eq!(
+                    buffer.push(&i, &vec![i as u8; ONE_PAGE_ENTRY_VALUE_SIZE], i, Compression::None, i),
+                    Push::Ok
+                );
+            }
+        };
+
+        // 1. The tail of the buffer cannot even hold an entry header.
+        let mut b = buffer();
+        fill(&mut b, (BUFFER_SIZE / PAGE) as _);
+        assert_eq!(
+            b.push(
+                &42u64,
+                &vec![42u8; ONE_PAGE_ENTRY_VALUE_SIZE],
+                42,
+                Compression::None,
+                42
+            ),
+            Push::NoSpace
+        );
+
+        // 2. The tail of the buffer holds an entry header, but not the serialized entry.
+        let mut b = buffer();
+        fill(&mut b, (BUFFER_SIZE / PAGE - 1) as _);
+        assert_eq!(
+            b.push(&42u64, &vec![42u8; 8 * KB], 42, Compression::None, 42),
+            Push::NoSpace
+        );
+
+        // 3. The entry is larger than the max entry size, it can never be stored.
+        let mut b = buffer();
+        assert_eq!(
+            b.push(&42u64, &vec![42u8; MAX_ENTRY_SIZE], 42, Compression::None, 42),
+            Push::Unstorable
+        );
+
+        // 4. The entry fits the max entry size, but is larger than the whole buffer.
+        //
+        // NOTE: The max entry size and the buffer size are configured separately, so an entry can be within the max
+        // entry size and still never fit a buffer. `NoSpace` against an empty buffer is the only signal for it.
+        let mut b = Buffer::new(IoSliceMut::new(8 * KB), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+        assert!(b.is_empty());
+        assert_eq!(
+            b.push(&42u64, &vec![42u8; 8 * KB], 42, Compression::None, 42),
+            Push::NoSpace
+        );
+        assert!(b.is_empty());
+    }
+
+    #[test_log::test]
+    fn test_push_slice_no_space_or_unstorable() {
+        const BLOCK_SIZE: usize = 16 * KB;
+        const BLOB_INDEX_SIZE: usize = 4 * KB;
+        const MAX_ENTRY_SIZE: usize = BLOCK_SIZE - BLOB_INDEX_SIZE;
+        const BUFFER_SIZE: usize = 16 * KB;
+
+        let mut b = Buffer::new(IoSliceMut::new(BUFFER_SIZE), MAX_ENTRY_SIZE, Arc::new(Metrics::noop()));
+
+        // The entry is larger than the max entry size, it can never be stored.
+        assert_eq!(b.push_slice(&vec![1u8; MAX_ENTRY_SIZE + 1], 1, 1), Push::Unstorable);
+
+        // Fill the buffer up.
+        assert_eq!(b.push_slice(&vec![2u8; PAGE], 2, 2), Push::Ok);
+        assert_eq!(b.push_slice(&vec![3u8; MAX_ENTRY_SIZE], 3, 3), Push::Ok);
+
+        // The entry fits the max entry size, but doesn't fit the tail of the buffer.
+        assert_eq!(b.push_slice(&vec![4u8; PAGE], 4, 4), Push::NoSpace);
     }
 
     #[test_log::test]
