@@ -223,3 +223,43 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use foyer_memory::{Cache, CacheBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_keeper_registration_lifecycle() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let keeper = Keeper::new(1);
+
+        // Replacing a value: dropping the old reference must preserve the new value.
+        let old = keeper.insert(memory.insert(1, 10).piece());
+        let piece = memory.insert(1, 20).piece();
+        let current = keeper.insert(piece.clone());
+
+        assert!(!old.is_current());
+        drop(old);
+        assert!(current.is_current());
+        assert_eq!(*keeper.get(piece.hash(), &1).unwrap().value(), 20);
+
+        // Repeated submissions of the same piece must have independent registrations.
+        let duplicate = keeper.insert(piece.clone());
+        assert!(!current.is_current());
+        drop(current);
+        assert!(duplicate.is_current());
+
+        // Deleting and reinserting: a stale reference must neither become current again nor remove the new entry.
+        let latest = keeper.insert(piece.clone());
+        drop(latest);
+        assert!(!duplicate.is_current());
+        assert!(keeper.get(piece.hash(), &1).is_none());
+
+        let reinserted = keeper.insert(piece);
+        assert!(!duplicate.is_current());
+        drop(duplicate);
+        assert!(reinserted.is_current());
+    }
+}
