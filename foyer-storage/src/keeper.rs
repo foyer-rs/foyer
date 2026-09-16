@@ -19,7 +19,24 @@ use foyer_memory::Piece;
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 use parking_lot::RwLock;
 
-type Shard<K, V, P> = HashTable<Piece<K, V, P>>;
+struct Pending<K, V, P> {
+    piece: Piece<K, V, P>,
+    id: u64,
+}
+
+struct Shard<K, V, P> {
+    pieces: HashTable<Pending<K, V, P>>,
+    next_id: u64,
+}
+
+impl<K, V, P> Default for Shard<K, V, P> {
+    fn default() -> Self {
+        Self {
+            pieces: HashTable::new(),
+            next_id: 0,
+        }
+    }
+}
 
 struct Inner<K, V, P>
 where
@@ -60,21 +77,31 @@ where
     pub fn insert(&self, piece: Piece<K, V, P>) -> PieceRef<K, V, P> {
         let shard = self.shard(piece.hash());
 
-        match shard
-            .write()
-            .entry(piece.hash(), |p| piece.key() == p.key(), |p| p.hash())
+        let mut guard = shard.write();
+        let id = guard.next_id;
+        guard.next_id = guard.next_id.wrapping_add(1);
+        match guard
+            .pieces
+            .entry(piece.hash(), |p| piece.key() == p.piece.key(), |p| p.piece.hash())
         {
             HashTableEntry::Occupied(mut o) => {
-                *o.get_mut() = piece.clone();
+                *o.get_mut() = Pending {
+                    piece: piece.clone(),
+                    id,
+                };
             }
             HashTableEntry::Vacant(v) => {
-                v.insert(piece.clone());
+                v.insert(Pending {
+                    piece: piece.clone(),
+                    id,
+                });
             }
         }
-
+        drop(guard);
         PieceRef {
             piece,
             shard: Some(shard),
+            id,
         }
     }
 
@@ -84,7 +111,10 @@ where
     {
         let shard = self.shard(hash);
         let shard = shard.read();
-        shard.find(hash, |p| key.equivalent(p.key())).cloned()
+        shard
+            .pieces
+            .find(hash, |p| key.equivalent(p.piece.key()))
+            .map(|p| p.piece.clone())
     }
 
     /// Check if the keeper holds a piece with the given key without cloning it.
@@ -94,7 +124,7 @@ where
     {
         let shard = self.shard(hash);
         let shard = shard.read();
-        shard.find(hash, |p| key.equivalent(p.key())).is_some()
+        shard.pieces.find(hash, |p| key.equivalent(p.piece.key())).is_some()
     }
 
     fn shard(&self, hash: u64) -> Arc<RwLock<Shard<K, V, P>>> {
@@ -115,6 +145,7 @@ where
     piece: Piece<K, V, P>,
     // TODO(MrCroxx): Remove `Option`?
     shard: Option<Arc<RwLock<Shard<K, V, P>>>>,
+    id: u64,
 }
 
 impl<K, V, P> Debug for PieceRef<K, V, P>
@@ -137,12 +168,37 @@ where
     }
 }
 
+impl<K, V, P> PieceRef<K, V, P>
+where
+    K: StorageKey,
+{
+    /// Return whether this reference owns the current keeper registration.
+    ///
+    /// Engines that coalesce submissions can retain the current registration
+    /// while dropping superseded ones, even if concurrent submissions reach
+    /// the engine in a different order from their keeper registration.
+    /// A reference constructed directly from a piece has no registration.
+    pub fn is_current(&self) -> bool {
+        self.shard.as_ref().is_some_and(|shard| {
+            shard
+                .read()
+                .pieces
+                .find(self.hash(), |p| self.key() == p.piece.key())
+                .is_some_and(|p| p.id == self.id)
+        })
+    }
+}
+
 impl<K, V, P> From<Piece<K, V, P>> for PieceRef<K, V, P>
 where
     K: StorageKey,
 {
     fn from(piece: Piece<K, V, P>) -> Self {
-        PieceRef { piece, shard: None }
+        PieceRef {
+            piece,
+            shard: None,
+            id: 0,
+        }
     }
 }
 
@@ -153,9 +209,14 @@ where
     fn drop(&mut self) {
         if let Some(shard) = self.shard.take() {
             let mut shard = shard.write();
-            match shard.entry(self.hash(), |p| self.key() == p.key(), |p| p.hash()) {
+            match shard
+                .pieces
+                .entry(self.hash(), |p| self.key() == p.piece.key(), |p| p.piece.hash())
+            {
                 HashTableEntry::Occupied(o) => {
-                    o.remove();
+                    if o.get().id == self.id {
+                        o.remove();
+                    }
                 }
                 HashTableEntry::Vacant(_) => {}
             }
