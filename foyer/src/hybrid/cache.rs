@@ -243,9 +243,7 @@ where
         let store = self.store.clone();
         Box::pin(async move {
             store.wait().await;
-            let device = store.device();
-            let throttler = device
-                .statistics()
+            let throttler = store
                 .throttle()
                 .write_throughput
                 .map(|v| RateLimiter::new(v.get() as _));
@@ -1101,7 +1099,7 @@ mod tests {
     async fn test_is_hybrid_in_memory() {
         let hybrid: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
 
-        assert_eq!(hybrid.storage().device().capacity(), 0);
+        assert!(hybrid.storage().device().is_none());
         assert!(!hybrid.storage().is_enabled());
         assert!(!hybrid.is_hybrid());
 
@@ -1118,7 +1116,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open(dir.path()).await;
 
-        assert!(hybrid.storage().device().capacity() > 0);
+        assert!(hybrid.storage().device().unwrap().capacity() > 0);
         assert!(hybrid.storage().is_enabled());
         assert!(hybrid.is_hybrid());
         hybrid.close().await.unwrap();

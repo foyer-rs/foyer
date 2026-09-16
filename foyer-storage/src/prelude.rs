@@ -40,7 +40,7 @@ pub use crate::{
             throttle::{IopsCounter, Throttle},
         },
         engine::{
-            IoEngine, IoEngineConfig, IoHandle,
+            IoEngine, IoEngineBuildContext, IoEngineConfig, IoHandle,
             noop::{NoopIoEngine, NoopIoEngineConfig},
             psync::{PsyncIoEngine, PsyncIoEngineConfig},
         },
