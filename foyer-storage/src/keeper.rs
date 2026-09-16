@@ -12,31 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt::Debug, hash::Hash, ops::Deref, sync::Arc};
+use std::{
+    fmt::Debug,
+    hash::Hash,
+    ops::Deref,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use foyer_common::code::StorageKey;
 use foyer_memory::Piece;
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 use parking_lot::RwLock;
 
-struct Pending<K, V, P> {
-    piece: Piece<K, V, P>,
-    id: u64,
-}
-
-struct Shard<K, V, P> {
-    pieces: HashTable<Pending<K, V, P>>,
-    next_id: u64,
-}
-
-impl<K, V, P> Default for Shard<K, V, P> {
-    fn default() -> Self {
-        Self {
-            pieces: HashTable::new(),
-            next_id: 0,
-        }
-    }
-}
+type Shard<K, V, P> = HashTable<(Piece<K, V, P>, Arc<AtomicBool>)>;
 
 struct Inner<K, V, P>
 where
@@ -78,30 +69,21 @@ where
         let shard = self.shard(piece.hash());
 
         let mut guard = shard.write();
-        let id = guard.next_id;
-        guard.next_id = guard.next_id.wrapping_add(1);
-        match guard
-            .pieces
-            .entry(piece.hash(), |p| piece.key() == p.piece.key(), |p| p.piece.hash())
-        {
+        let current = Arc::new(AtomicBool::new(true));
+        match guard.entry(piece.hash(), |(p, _)| piece.key() == p.key(), |(p, _)| p.hash()) {
             HashTableEntry::Occupied(mut o) => {
-                *o.get_mut() = Pending {
-                    piece: piece.clone(),
-                    id,
-                };
+                o.get().1.store(false, Ordering::Relaxed);
+                *o.get_mut() = (piece.clone(), current.clone());
             }
             HashTableEntry::Vacant(v) => {
-                v.insert(Pending {
-                    piece: piece.clone(),
-                    id,
-                });
+                v.insert((piece.clone(), current.clone()));
             }
         }
         drop(guard);
         PieceRef {
             piece,
             shard: Some(shard),
-            id,
+            current,
         }
     }
 
@@ -112,9 +94,8 @@ where
         let shard = self.shard(hash);
         let shard = shard.read();
         shard
-            .pieces
-            .find(hash, |p| key.equivalent(p.piece.key()))
-            .map(|p| p.piece.clone())
+            .find(hash, |(piece, _)| key.equivalent(piece.key()))
+            .map(|(piece, _)| piece.clone())
     }
 
     /// Check if the keeper holds a piece with the given key without cloning it.
@@ -124,7 +105,7 @@ where
     {
         let shard = self.shard(hash);
         let shard = shard.read();
-        shard.pieces.find(hash, |p| key.equivalent(p.piece.key())).is_some()
+        shard.find(hash, |(piece, _)| key.equivalent(piece.key())).is_some()
     }
 
     fn shard(&self, hash: u64) -> Arc<RwLock<Shard<K, V, P>>> {
@@ -145,7 +126,7 @@ where
     piece: Piece<K, V, P>,
     // TODO(MrCroxx): Remove `Option`?
     shard: Option<Arc<RwLock<Shard<K, V, P>>>>,
-    id: u64,
+    current: Arc<AtomicBool>,
 }
 
 impl<K, V, P> Debug for PieceRef<K, V, P>
@@ -178,14 +159,10 @@ where
     /// while dropping superseded ones, even if concurrent submissions reach
     /// the engine in a different order from their keeper registration.
     /// A reference constructed directly from a piece has no registration.
+    /// The result is a snapshot and may become stale immediately after the call.
     pub fn is_current(&self) -> bool {
-        self.shard.as_ref().is_some_and(|shard| {
-            shard
-                .read()
-                .pieces
-                .find(self.hash(), |p| self.key() == p.piece.key())
-                .is_some_and(|p| p.id == self.id)
-        })
+        // The flag tracks registration identity, not publication of the entry data.
+        self.current.load(Ordering::Relaxed)
     }
 }
 
@@ -197,7 +174,7 @@ where
         PieceRef {
             piece,
             shard: None,
-            id: 0,
+            current: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -207,14 +184,17 @@ where
     K: StorageKey,
 {
     fn drop(&mut self) {
+        // Superseded registrations never become current again.
+        if !self.is_current() {
+            return;
+        }
         if let Some(shard) = self.shard.take() {
             let mut shard = shard.write();
-            match shard
-                .pieces
-                .entry(self.hash(), |p| self.key() == p.piece.key(), |p| p.piece.hash())
-            {
+            match shard.entry(self.hash(), |(p, _)| self.key() == p.key(), |(p, _)| p.hash()) {
                 HashTableEntry::Occupied(o) => {
-                    if o.get().id == self.id {
+                    // A replacement may have occurred before acquiring the write lock.
+                    if Arc::ptr_eq(&o.get().1, &self.current) {
+                        self.current.store(false, Ordering::Relaxed);
                         o.remove();
                     }
                 }
@@ -261,5 +241,22 @@ mod tests {
         assert!(!duplicate.is_current());
         drop(duplicate);
         assert!(reinserted.is_current());
+
+        // A reference created without registering must not affect the current registration.
+        let unregistered = PieceRef::from((*reinserted).clone());
+        assert!(!unregistered.is_current());
+        drop(unregistered);
+        assert!(reinserted.is_current());
+
+        // Checking the current registration must not wait for a shard writer.
+        let shard = keeper.shard(reinserted.hash());
+        let guard = shard.write();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            scope.spawn(|| tx.send(reinserted.is_current()).unwrap());
+            let result = rx.recv_timeout(std::time::Duration::from_secs(5));
+            drop(guard);
+            assert_eq!(result, Ok(true));
+        });
     }
 }
