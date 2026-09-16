@@ -1,0 +1,25 @@
+[package]
+name = "foyer-opendal"
+description = "Experimental OpenDAL secondary cache engine for foyer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["runtime-tokio"]
+runtime-tokio = ["foyer/runtime-tokio", "tokio/runtime-tokio"]
+
+[dependencies]
+foyer = { workspace = true }
+foyer-common = { workspace = true }
+foyer-storage = { workspace = true }
+futures-util = { workspace = true }
+opendal-core = { version = "=0.59.1", default-features = false }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[lints]
+workspace = true
