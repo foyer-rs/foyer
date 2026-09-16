@@ -35,7 +35,7 @@ use crate::{
     },
     io::{
         device::{Device, statistics::Statistics, throttle::Throttle},
-        engine::{IoEngineBuildContext, IoEngineConfig, monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig},
+        engine::{IoEngineConfig, psync::PsyncIoEngineConfig},
     },
     keeper::Keeper,
     serde::EntrySerializer,
@@ -266,19 +266,19 @@ where
         self.inner.engine.destroy().await
     }
 
-    /// Get the device of the disk cache.
-    pub fn device(&self) -> &Arc<dyn Device> {
+    /// Get the block device, if the storage engine uses one.
+    pub fn device(&self) -> Option<&Arc<dyn Device>> {
         self.inner.engine.device()
     }
 
     /// Get the statistics information of the disk cache.
     pub fn statistics(&self) -> &Arc<Statistics> {
-        self.inner.engine.device().statistics()
+        self.inner.engine.statistics()
     }
 
     /// Get the io throttle of the disk cache.
     pub fn throttle(&self) -> &Throttle {
-        self.inner.engine.device().statistics().throttle()
+        self.inner.engine.statistics().throttle()
     }
 
     /// Get the spawner.
@@ -382,6 +382,8 @@ where
     /// Set io engine config for the disk cache store.
     ///
     /// Default: [`crate::io::engine::psync::PsyncIoEngineConfig`].
+    /// Engines that use block I/O construct this configuration when they build.
+    /// Engines with their own storage client do not construct it.
     pub fn with_io_engine_config(mut self, io_engine_builder: impl Into<Box<dyn IoEngineConfig>>) -> Self {
         self.io_engine_config = Some(io_engine_builder.into());
         self
@@ -444,21 +446,9 @@ where
 
         let spawner = self.spawner.unwrap_or_else(Spawner::current);
 
-        let io_engine_builder = match self.io_engine_config {
-            Some(builder) => builder,
-            None => {
-                tracing::info!(
-                    "[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default."
-                );
-                PsyncIoEngineConfig::new().boxed()
-            }
-        };
-        let io_engine = io_engine_builder
-            .build(IoEngineBuildContext {
-                spawner: spawner.clone(),
-            })
-            .await?;
-        let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
+        let io_engine_config = self
+            .io_engine_config
+            .unwrap_or_else(|| PsyncIoEngineConfig::new().boxed());
 
         let engine_builder = match self.engine_config {
             Some(eb) => eb,
@@ -473,7 +463,7 @@ where
 
         let engine = engine_builder
             .build(EngineBuildContext {
-                io_engine,
+                io_engine_config,
                 metrics: metrics.clone(),
                 spawner: spawner.clone(),
                 recover_mode: self.recover_mode,

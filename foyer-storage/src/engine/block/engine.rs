@@ -49,7 +49,7 @@ use super::{
 #[cfg(any(test, feature = "test_utils"))]
 use crate::test_utils::*;
 use crate::{
-    Device, Load, RejectAll, StorageFilter, StorageFilterResult,
+    Device, Load, RejectAll, Statistics, StorageFilter, StorageFilterResult,
     compress::Compression,
     engine::{
         Engine, EngineBuildContext, EngineConfig, Populated,
@@ -62,7 +62,11 @@ use crate::{
         },
     },
     filter::conditions::IoThrottle,
-    io::{PAGE, bytes::IoSliceMut},
+    io::{
+        PAGE,
+        bytes::IoSliceMut,
+        engine::{IoEngineBuildContext, monitor::MonitoredIoEngine},
+    },
     keeper::PieceRef,
     serde::EntryDeserializer,
 };
@@ -324,12 +328,18 @@ where
     pub async fn build(
         self: Box<Self>,
         EngineBuildContext {
-            io_engine,
+            io_engine_config,
             metrics,
             spawner: runtime,
             recover_mode,
         }: EngineBuildContext,
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
+        let io_engine = io_engine_config
+            .build(IoEngineBuildContext {
+                spawner: runtime.clone(),
+            })
+            .await?;
+        let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
         let device = self.device;
         let block_size = self.block_size;
 
@@ -803,8 +813,12 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.inner.device
+    fn device(&self) -> Option<&Arc<dyn Device>> {
+        Some(&self.inner.device)
+    }
+
+    fn statistics(&self) -> &Arc<Statistics> {
+        self.inner.device.statistics()
     }
 
     fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult {
@@ -860,7 +874,7 @@ mod tests {
         engine::RecoverMode,
         io::{
             device::{DeviceBuilder, combined::CombinedDeviceBuilder, fs::FsDeviceBuilder},
-            engine::{IoEngine, IoEngineBuildContext, IoEngineConfig},
+            engine::IoEngineConfig,
         },
         serde::EntrySerializer,
         test_utils::Biased,
@@ -874,15 +888,6 @@ mod tests {
             .with_eviction_config(FifoConfig::default())
             .with_hash_builder(ModHasher::default())
             .build()
-    }
-
-    async fn io_engine_for_test(spawner: Spawner) -> Arc<dyn IoEngine> {
-        // TODO(MrCroxx): Test with other io engines.
-        PsyncIoEngineConfig::new()
-            .boxed()
-            .build(IoEngineBuildContext { spawner })
-            .await
-            .unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.
@@ -899,7 +904,6 @@ mod tests {
             .build()
             .unwrap();
         let spawner = Spawner::current();
-        let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
         let builder = BlockEngineConfig {
             device,
@@ -925,7 +929,7 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
-                io_engine,
+                io_engine_config: PsyncIoEngineConfig::new().boxed(),
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
@@ -942,7 +946,6 @@ mod tests {
             .build()
             .unwrap();
         let spawner = Spawner::current();
-        let io_engine = io_engine_for_test(spawner.clone()).await;
         let metrics = Arc::new(Metrics::noop());
         let builder = BlockEngineConfig {
             device,
@@ -967,7 +970,7 @@ mod tests {
         let builder = Box::new(builder);
         builder
             .build(EngineBuildContext {
-                io_engine,
+                io_engine_config: PsyncIoEngineConfig::new().boxed(),
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
@@ -1370,7 +1373,6 @@ mod tests {
         const MB: usize = 1024 * 1024;
 
         let spawner = Spawner::current();
-        let io_engine = io_engine_for_test(spawner.clone()).await;
 
         let d1 = FsDeviceBuilder::new(dir.path().join("dev1"))
             .with_capacity(MB)
@@ -1394,7 +1396,7 @@ mod tests {
             .with_block_size(64 * KB)
             .boxed()
             .build(EngineBuildContext {
-                io_engine,
+                io_engine_config: PsyncIoEngineConfig::new().boxed(),
                 metrics: Arc::new(Metrics::noop()),
                 spawner,
                 recover_mode: RecoverMode::None,

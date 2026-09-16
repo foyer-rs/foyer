@@ -79,7 +79,13 @@ impl Metric {
     }
 }
 
-/// The statistics of the device.
+/// Storage I/O counters and throttle state.
+///
+/// A block device shares these counters with its partitions. Engines without a
+/// block device own their counters directly. The legacy `disk_*` names describe
+/// bytes and operations recorded by the engine, not physical backend usage or
+/// cache occupancy. Deletes and backend-internal retries are not counted unless
+/// an engine explicitly documents otherwise.
 #[derive(Debug)]
 pub struct Statistics {
     throttle: Throttle,
