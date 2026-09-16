@@ -223,3 +223,143 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use foyer_common::hasher::ModHasher;
+    use foyer_memory::{Cache, CacheBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_drop_superseded_registration_preserves_current_piece() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let keeper = Keeper::new(1);
+        let first = memory.insert(1, 10);
+        let hash = first.piece().hash();
+        let old = keeper.insert(first.piece());
+        assert!(old.is_current());
+
+        let second = memory.insert(1, 20);
+        let current = keeper.insert(second.piece());
+        assert!(!old.is_current());
+        assert!(current.is_current());
+        assert_eq!(*old.value(), 10);
+
+        drop(old);
+        assert!(current.is_current());
+        assert!(keeper.contains(hash, &1));
+        assert_eq!(*keeper.get(hash, &1).unwrap().value(), 20);
+
+        drop(current);
+        assert!(!keeper.contains(hash, &1));
+        assert!(keeper.get(hash, &1).is_none());
+    }
+
+    #[test]
+    fn test_repeated_piece_registrations_are_independent() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let keeper = Keeper::new(1);
+        let entry = memory.insert(1, 10);
+        let piece = entry.piece();
+        let hash = piece.hash();
+
+        // Even submissions of the same memory record need distinct registrations.
+        let first = keeper.insert(piece.clone());
+        let second = keeper.insert(piece.clone());
+        let third = keeper.insert(piece);
+        assert!(!first.is_current());
+        assert!(!second.is_current());
+        assert!(third.is_current());
+
+        drop(second);
+        drop(first);
+        assert!(third.is_current());
+        assert!(keeper.contains(hash, &1));
+        assert_eq!(*keeper.get(hash, &1).unwrap().value(), 10);
+
+        drop(third);
+        assert!(!keeper.contains(hash, &1));
+        assert!(keeper.get(hash, &1).is_none());
+    }
+
+    #[test]
+    fn test_stale_reference_does_not_remove_reinserted_registration() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let keeper = Keeper::new(1);
+        let entry = memory.insert(1, 10);
+        let hash = entry.piece().hash();
+        let old = keeper.insert(entry.piece());
+        let current = keeper.insert(entry.piece());
+
+        // Removing the current registration does not restore a superseded one.
+        drop(current);
+        assert!(!old.is_current());
+        assert!(!keeper.contains(hash, &1));
+        assert!(keeper.get(hash, &1).is_none());
+
+        let reinserted = keeper.insert(entry.piece());
+        assert!(!old.is_current());
+        drop(old);
+        assert!(reinserted.is_current());
+        assert!(keeper.contains(hash, &1));
+        assert_eq!(*keeper.get(hash, &1).unwrap().value(), 10);
+
+        drop(reinserted);
+        assert!(keeper.get(hash, &1).is_none());
+    }
+
+    #[test]
+    fn test_unregistered_reference_does_not_remove_keeper_registration() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let keeper = Keeper::new(1);
+        let entry = memory.insert(1, 10);
+        let hash = entry.piece().hash();
+        let current = keeper.insert(entry.piece());
+        let unregistered = PieceRef::from(entry.piece());
+        assert!(!unregistered.is_current());
+
+        drop(unregistered);
+        assert!(current.is_current());
+        assert!(keeper.contains(hash, &1));
+        assert_eq!(*keeper.get(hash, &1).unwrap().value(), 10);
+
+        drop(current);
+        assert!(keeper.get(hash, &1).is_none());
+    }
+
+    #[test]
+    fn test_colliding_keys_have_independent_registrations() {
+        let memory: Cache<u128, u64, ModHasher> = CacheBuilder::new(16)
+            .with_shards(1)
+            .with_hash_builder(ModHasher::default())
+            .build();
+        let keeper = Keeper::new(1);
+        let first = memory.insert(1, 10);
+        let second = memory.insert(1 + (1_u128 << 64), 20);
+        let hash = first.piece().hash();
+        assert_eq!(hash, second.piece().hash());
+
+        let old = keeper.insert(first.piece());
+        let current = keeper.insert(first.piece());
+        let other = keeper.insert(second.piece());
+        assert!(!old.is_current());
+        assert!(current.is_current());
+        assert!(other.is_current());
+
+        drop(old);
+        assert!(current.is_current());
+        assert!(other.is_current());
+        assert_eq!(*keeper.get(hash, first.key()).unwrap().value(), 10);
+        assert_eq!(*keeper.get(hash, second.key()).unwrap().value(), 20);
+
+        drop(current);
+        assert!(!keeper.contains(hash, first.key()));
+        assert!(other.is_current());
+        assert!(keeper.contains(hash, second.key()));
+        assert_eq!(*keeper.get(hash, second.key()).unwrap().value(), 20);
+
+        drop(other);
+        assert!(keeper.get(hash, second.key()).is_none());
+    }
+}
