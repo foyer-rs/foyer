@@ -20,6 +20,7 @@ publish = false
 ignored = ["tonic"]
 
 [features]
+opendal = ["dep:foyer-opendal", "dep:opendal-core", "dep:opendal-service-fs"]
 serde = ["foyer/serde"]
 otel = [
   "fastrace-opentelemetry",
@@ -35,6 +36,9 @@ equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true, features = ["runtime-tokio"] }
+foyer-opendal = { workspace = true, features = ["runtime-tokio"], optional = true }
+opendal-core = { version = "=0.59.1", default-features = false, optional = true }
+opendal-service-fs = { version = "=0.59.1", optional = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, default-features = false, features = [
   "server",
@@ -91,3 +95,8 @@ path = "export_metrics_prometheus_hyper.rs"
 [[example]]
 name = "serde"
 path = "serde.rs"
+
+[[example]]
+name = "opendal"
+path = "opendal.rs"
+required-features = ["opendal"]
