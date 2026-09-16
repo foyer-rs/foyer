@@ -129,15 +129,9 @@ where
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
-        if force
-            || self
-                .filter(
-                    piece.hash(),
-                    piece.key().estimated_size() + piece.value().estimated_size(),
-                )
-                .is_admitted()
-        {
-            let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+        let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+
+        if force || self.filter(piece.hash(), estimated_size).is_admitted() {
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
         } else {
