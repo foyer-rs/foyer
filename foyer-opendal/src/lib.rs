@@ -23,7 +23,9 @@
 //! [`RecoverMode::None`]. Restart recovery and shared writers are not supported.
 //! Logical capacity and queued payload bytes do not bound process memory or
 //! physical backend usage. Timed-out writes and failed deletes can leave objects.
-//! The no-op device only satisfies the existing [`Engine`] interface.
+//! I/O statistics count successful object reads and writes and their encoded
+//! bytes, excluding deletes, failed calls, and backend-internal retries. They
+//! do not describe physical backend usage. No block device or I/O engine is used.
 
 use foyer::{Code, HybridCacheProperties};
 use foyer_common::{
@@ -31,8 +33,8 @@ use foyer_common::{
     properties::Age,
 };
 use foyer_storage::{
-    Device, DeviceBuilder, Engine, EngineBuildContext, EngineConfig, Load, NoopDeviceBuilder, PieceRef, Populated,
-    RecoverMode, StorageFilterResult,
+    Engine, EngineBuildContext, EngineConfig, Load, PieceRef, Populated, RecoverMode, Statistics, StorageFilterResult,
+    Throttle,
 };
 use futures_util::future::BoxFuture;
 use opendal_core::Operator;
@@ -90,6 +92,7 @@ struct Shared {
     timeout: Duration,
     state: Mutex<State>,
     queued_bytes: AtomicUsize,
+    statistics: Arc<Statistics>,
 }
 
 impl Shared {
@@ -137,6 +140,7 @@ impl Shared {
                 let size = bytes.len();
                 match tokio::time::timeout(self.timeout, self.op.write(&path, bytes)).await {
                     Ok(Ok(_)) => {
+                        self.statistics.record_disk_write(size);
                         let removed = {
                             let mut state = self.state.lock();
                             let mut removed = Vec::new();
@@ -196,7 +200,6 @@ enum Command {
 struct OpenDalEngine {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Command>,
-    device: Arc<dyn Device>,
 }
 
 /// Configuration for the experimental OpenDAL secondary cache.
@@ -270,12 +273,12 @@ impl EngineConfig<String, Vec<u8>, HybridCacheProperties> for OpenDalEngineConfi
                 timeout: Duration::from_secs(2),
                 state: Mutex::new(State::default()),
                 queued_bytes: AtomicUsize::new(0),
+                statistics: Arc::new(Statistics::new(Throttle::default())),
             });
             let (tx, mut receiver) = mpsc::unbounded_channel();
             let engine = Arc::new(OpenDalEngine {
                 shared: shared.clone(),
                 tx,
-                device: NoopDeviceBuilder::new(self.capacity).build()?,
             });
             ctx.spawner.spawn(async move {
                 while let Some(command) = receiver.recv().await {
@@ -308,8 +311,8 @@ impl EngineConfig<String, Vec<u8>, HybridCacheProperties> for OpenDalEngineConfi
 }
 
 impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.device
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.shared.statistics
     }
 
     fn filter(&self, _: u64, estimated_size: usize) -> StorageFilterResult {
@@ -382,7 +385,10 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 return Ok(Load::Miss);
             };
             let bytes = match tokio::time::timeout(shared.timeout, shared.op.read(&object.path)).await {
-                Ok(Ok(bytes)) => bytes.to_vec(),
+                Ok(Ok(bytes)) => {
+                    shared.statistics.record_disk_read(bytes.len());
+                    bytes.to_vec()
+                }
                 Ok(Err(e)) if e.kind() == opendal_core::ErrorKind::NotFound => {
                     shared.forget_object(hash, object.sequence);
                     return Ok(Load::Miss);

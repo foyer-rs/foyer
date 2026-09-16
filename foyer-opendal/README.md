@@ -3,7 +3,10 @@
 `foyer-opendal` implements Foyer's `Engine` interface over a caller-supplied
 OpenDAL `Operator`. Foyer keeps memory lookup and request coalescing; OpenDAL
 stores cache objects after memory. The engine owns its pending writes, index,
-and FIFO eviction.
+and FIFO eviction. It owns its I/O statistics and constructs no block device or
+POSIX I/O engine. Statistics count successful object reads/writes and encoded
+bytes; deletes, failed calls, and backend-internal retries are excluded. They do
+not measure physical storage or indexed capacity.
 
 Run the filesystem example:
 
@@ -55,8 +58,6 @@ This crate is unpublished and experimental. The stack makes the integration
 concrete for review; it does not complete the production engine in
 [the tracking issue](https://github.com/foyer-rs/foyer/issues/1350).
 
-- [#1352](https://github.com/foyer-rs/foyer/issues/1352): remove the `NoopDevice`
-  compatibility shim required by the current engine interface.
 - [#1353](https://github.com/foyer-rs/foyer/issues/1353): bound total memory,
   command queues, metadata, and physical storage.
 - [#1354](https://github.com/foyer-rs/foyer/issues/1354): finish failure and
