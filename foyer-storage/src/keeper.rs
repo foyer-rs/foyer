@@ -27,7 +27,12 @@ use foyer_memory::Piece;
 use hashbrown::hash_table::{Entry as HashTableEntry, HashTable};
 use parking_lot::RwLock;
 
-type Shard<K, V, P> = HashTable<(Piece<K, V, P>, Arc<AtomicBool>)>;
+struct Pending<K, V, P> {
+    piece: Piece<K, V, P>,
+    current: Arc<AtomicBool>,
+}
+
+type Shard<K, V, P> = HashTable<Pending<K, V, P>>;
 
 struct Inner<K, V, P>
 where
@@ -70,13 +75,19 @@ where
 
         let mut guard = shard.write();
         let current = Arc::new(AtomicBool::new(true));
-        match guard.entry(piece.hash(), |(p, _)| piece.key() == p.key(), |(p, _)| p.hash()) {
+        match guard.entry(piece.hash(), |p| piece.key() == p.piece.key(), |p| p.piece.hash()) {
             HashTableEntry::Occupied(mut o) => {
-                o.get().1.store(false, Ordering::Relaxed);
-                *o.get_mut() = (piece.clone(), current.clone());
+                o.get().current.store(false, Ordering::Relaxed);
+                *o.get_mut() = Pending {
+                    piece: piece.clone(),
+                    current: current.clone(),
+                };
             }
             HashTableEntry::Vacant(v) => {
-                v.insert((piece.clone(), current.clone()));
+                v.insert(Pending {
+                    piece: piece.clone(),
+                    current: current.clone(),
+                });
             }
         }
         drop(guard);
@@ -94,8 +105,8 @@ where
         let shard = self.shard(hash);
         let shard = shard.read();
         shard
-            .find(hash, |(piece, _)| key.equivalent(piece.key()))
-            .map(|(piece, _)| piece.clone())
+            .find(hash, |p| key.equivalent(p.piece.key()))
+            .map(|p| p.piece.clone())
     }
 
     /// Check if the keeper holds a piece with the given key without cloning it.
@@ -105,7 +116,7 @@ where
     {
         let shard = self.shard(hash);
         let shard = shard.read();
-        shard.find(hash, |(piece, _)| key.equivalent(piece.key())).is_some()
+        shard.find(hash, |p| key.equivalent(p.piece.key())).is_some()
     }
 
     fn shard(&self, hash: u64) -> Arc<RwLock<Shard<K, V, P>>> {
@@ -190,10 +201,10 @@ where
         }
         if let Some(shard) = self.shard.take() {
             let mut shard = shard.write();
-            match shard.entry(self.hash(), |(p, _)| self.key() == p.key(), |(p, _)| p.hash()) {
+            match shard.entry(self.hash(), |p| self.key() == p.piece.key(), |p| p.piece.hash()) {
                 HashTableEntry::Occupied(o) => {
                     // A replacement may have occurred before acquiring the write lock.
-                    if Arc::ptr_eq(&o.get().1, &self.current) {
+                    if Arc::ptr_eq(&o.get().current, &self.current) {
                         self.current.store(false, Ordering::Relaxed);
                         o.remove();
                     }
