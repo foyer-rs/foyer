@@ -130,8 +130,33 @@ where
         let now = Instant::now();
 
         let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+        let admission = if force {
+            None
+        } else {
+            Some(self.filter(piece.hash(), estimated_size))
+        };
+        let (admission_count, admission_bytes) = match admission {
+            None => (
+                &self.inner.metrics.storage_admission_forced,
+                &self.inner.metrics.storage_admission_forced_bytes,
+            ),
+            Some(StorageFilterResult::Admit) => (
+                &self.inner.metrics.storage_admission_admitted,
+                &self.inner.metrics.storage_admission_admitted_bytes,
+            ),
+            Some(StorageFilterResult::Reject) => (
+                &self.inner.metrics.storage_admission_rejected,
+                &self.inner.metrics.storage_admission_rejected_bytes,
+            ),
+            Some(StorageFilterResult::Throttled(_)) => (
+                &self.inner.metrics.storage_admission_throttled,
+                &self.inner.metrics.storage_admission_throttled_bytes,
+            ),
+        };
+        admission_count.increase(1);
+        admission_bytes.increase(estimated_size as u64);
 
-        if force || self.filter(piece.hash(), estimated_size).is_admitted() {
+        if admission.is_none_or(|result| result.is_admitted()) {
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
         } else {

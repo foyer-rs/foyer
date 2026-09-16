@@ -238,8 +238,13 @@ where
         tracing::trace!(id = self.id, "[block engine flusher]: submit task: {submission:?}");
         if let Submission::CacheEntry { estimated_size, .. } = &submission {
             self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
+            self.metrics.storage_queue_size_bytes.increase(*estimated_size as u64);
         }
         if let Err(e) = self.tx.send(submission) {
+            if let Submission::CacheEntry { estimated_size, .. } = e.as_inner() {
+                self.submit_queue_size.fetch_sub(*estimated_size, Ordering::Relaxed);
+                self.metrics.storage_queue_size_bytes.decrease(*estimated_size as u64);
+            }
             tracing::error!(
                 id = self.id,
                 "[block engine flusher]: error raised when submitting task, error: {e}"
@@ -417,12 +422,6 @@ where
             self.queue_init = Some(Instant::now());
         }
 
-        let report = |written: bool| {
-            if !written {
-                self.metrics.storage_queue_buffer_overflow.increase(1);
-            }
-        };
-
         match submission {
             Submission::CacheEntry {
                 piece,
@@ -438,20 +437,32 @@ where
                 );
                 if enqueued {
                     self.piece_refs.push(piece);
+                } else {
+                    self.metrics.storage_queue_buffer_overflow.increase(1);
+                    self.metrics
+                        .storage_queue_buffer_overflow_bytes
+                        .increase(estimated_size as u64);
                 }
-                report(enqueued);
                 self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
+                self.metrics.storage_queue_size_bytes.decrease(estimated_size as u64);
             }
 
             Submission::Tombstone { tombstone, stats } => self.tombstone_infos.push(TombstoneInfo { tombstone, stats }),
             Submission::Reinsertion { reinsertion } => {
                 // Skip reinsertion if the entry is not in the indexer.
                 if self.indexer.get(reinsertion.hash).is_some() {
-                    report(self.buffer.as_mut().unwrap().push_slice(
+                    let estimated_size = reinsertion.len;
+                    let enqueued = self.buffer.as_mut().unwrap().push_slice(
                         &reinsertion.slice[..reinsertion.len],
                         reinsertion.hash,
                         reinsertion.sequence,
-                    ));
+                    );
+                    if !enqueued {
+                        self.metrics.storage_queue_buffer_overflow.increase(1);
+                        self.metrics
+                            .storage_queue_buffer_overflow_bytes
+                            .increase(estimated_size as u64);
+                    }
                 }
             }
             Submission::Wait { tx } => self.waiters.push(tx),

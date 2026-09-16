@@ -42,6 +42,15 @@ pub struct Metrics {
     pub storage_error: BoxedCounter,
     pub storage_false_positive: BoxedCounter,
 
+    pub storage_admission_forced: BoxedCounter,
+    pub storage_admission_admitted: BoxedCounter,
+    pub storage_admission_rejected: BoxedCounter,
+    pub storage_admission_throttled: BoxedCounter,
+    pub storage_admission_forced_bytes: BoxedCounter,
+    pub storage_admission_admitted_bytes: BoxedCounter,
+    pub storage_admission_rejected_bytes: BoxedCounter,
+    pub storage_admission_throttled_bytes: BoxedCounter,
+
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
     pub storage_miss_duration: BoxedHistogram,
@@ -52,6 +61,10 @@ pub struct Metrics {
     pub storage_queue_rotate_duration: BoxedHistogram,
     pub storage_queue_buffer_overflow: BoxedCounter,
     pub storage_queue_channel_overflow: BoxedCounter,
+    pub storage_queue_buffer_overflow_bytes: BoxedCounter,
+    pub storage_queue_channel_overflow_bytes: BoxedCounter,
+    pub storage_queue_enqueue_skip_bytes: BoxedCounter,
+    pub storage_queue_size_bytes: BoxedGauge,
 
     pub storage_disk_write: BoxedCounter,
     pub storage_disk_read: BoxedCounter,
@@ -59,6 +72,12 @@ pub struct Metrics {
 
     pub storage_disk_write_bytes: BoxedCounter,
     pub storage_disk_read_bytes: BoxedCounter,
+
+    pub storage_disk_write_inflight: BoxedGauge,
+    pub storage_disk_read_inflight: BoxedGauge,
+    pub storage_disk_combined_inflight: BoxedGauge,
+    pub storage_disk_write_overlap: BoxedCounter,
+    pub storage_disk_read_overlap: BoxedCounter,
 
     pub storage_disk_write_duration: BoxedHistogram,
     pub storage_disk_read_duration: BoxedHistogram,
@@ -153,6 +172,17 @@ impl Metrics {
             Buckets::exponential(0.000_001, 2.0, 23),
         );
 
+        let foyer_storage_admission_total = registry.register_counter_vec(
+            "foyer_storage_admission_total".into(),
+            "foyer disk cache admission decisions".into(),
+            &["name", "outcome"],
+        );
+        let foyer_storage_admission_bytes = registry.register_counter_vec(
+            "foyer_storage_admission_bytes_total".into(),
+            "foyer estimated disk cache admission bytes".into(),
+            &["name", "outcome"],
+        );
+
         let foyer_storage_inner_op_total = registry.register_counter_vec(
             "foyer_storage_inner_op_total".into(),
             "foyer disk cache inner operations".into(),
@@ -164,6 +194,16 @@ impl Metrics {
             &["name", "op"],
             // 1us ~ 16s
             Buckets::exponential(0.000_001, 2.0, 25),
+        );
+        let foyer_storage_queue_drop_bytes = registry.register_counter_vec(
+            "foyer_storage_queue_drop_bytes_total".into(),
+            "foyer estimated disk cache bytes dropped from the write queue".into(),
+            &["name", "reason"],
+        );
+        let foyer_storage_queue_size_bytes = registry.register_gauge_vec(
+            "foyer_storage_queue_size_bytes".into(),
+            "foyer estimated disk cache bytes waiting in the write queue".into(),
+            &["name"],
         );
 
         let foyer_storage_disk_io_total = registry.register_counter_vec(
@@ -182,6 +222,16 @@ impl Metrics {
             &["name", "op"],
             // 1us ~ 4s
             Buckets::exponential(0.000_001, 2.0, 23),
+        );
+        let foyer_storage_disk_io_inflight = registry.register_gauge_vec(
+            "foyer_storage_disk_io_inflight".into(),
+            "foyer disk cache io operations currently in flight".into(),
+            &["name", "op"],
+        );
+        let foyer_storage_disk_io_overlap = registry.register_counter_vec(
+            "foyer_storage_disk_io_overlap_total".into(),
+            "foyer disk cache io operations started while the opposite direction was in flight".into(),
+            &["name", "started_op"],
         );
 
         let foyer_storage_block_engine_block = registry.register_gauge_vec(
@@ -233,6 +283,18 @@ impl Metrics {
         let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
         let storage_false_positive = foyer_storage_op_total.counter(&[name.clone(), "false_positive".into()]);
 
+        let storage_admission_forced = foyer_storage_admission_total.counter(&[name.clone(), "forced".into()]);
+        let storage_admission_admitted = foyer_storage_admission_total.counter(&[name.clone(), "admitted".into()]);
+        let storage_admission_rejected = foyer_storage_admission_total.counter(&[name.clone(), "rejected".into()]);
+        let storage_admission_throttled = foyer_storage_admission_total.counter(&[name.clone(), "throttled".into()]);
+        let storage_admission_forced_bytes = foyer_storage_admission_bytes.counter(&[name.clone(), "forced".into()]);
+        let storage_admission_admitted_bytes =
+            foyer_storage_admission_bytes.counter(&[name.clone(), "admitted".into()]);
+        let storage_admission_rejected_bytes =
+            foyer_storage_admission_bytes.counter(&[name.clone(), "rejected".into()]);
+        let storage_admission_throttled_bytes =
+            foyer_storage_admission_bytes.counter(&[name.clone(), "throttled".into()]);
+
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
         let storage_miss_duration = foyer_storage_op_duration.histogram(&[name.clone(), "miss".into()]);
@@ -244,6 +306,13 @@ impl Metrics {
             foyer_storage_inner_op_total.counter(&[name.clone(), "buffer_overflow".into()]);
         let storage_queue_channel_overflow =
             foyer_storage_inner_op_total.counter(&[name.clone(), "channel_overflow".into()]);
+        let storage_queue_buffer_overflow_bytes =
+            foyer_storage_queue_drop_bytes.counter(&[name.clone(), "buffer_overflow".into()]);
+        let storage_queue_channel_overflow_bytes =
+            foyer_storage_queue_drop_bytes.counter(&[name.clone(), "channel_overflow".into()]);
+        let storage_queue_enqueue_skip_bytes =
+            foyer_storage_queue_drop_bytes.counter(&[name.clone(), "young_skip".into()]);
+        let storage_queue_size_bytes = foyer_storage_queue_size_bytes.gauge(std::slice::from_ref(&name));
 
         let storage_queue_rotate_duration =
             foyer_storage_inner_op_duration.histogram(&[name.clone(), "queue_rotate".into()]);
@@ -254,6 +323,12 @@ impl Metrics {
 
         let storage_disk_write_bytes = foyer_storage_disk_io_bytes.counter(&[name.clone(), "write".into()]);
         let storage_disk_read_bytes = foyer_storage_disk_io_bytes.counter(&[name.clone(), "read".into()]);
+
+        let storage_disk_write_inflight = foyer_storage_disk_io_inflight.gauge(&[name.clone(), "write".into()]);
+        let storage_disk_read_inflight = foyer_storage_disk_io_inflight.gauge(&[name.clone(), "read".into()]);
+        let storage_disk_combined_inflight = foyer_storage_disk_io_inflight.gauge(&[name.clone(), "combined".into()]);
+        let storage_disk_write_overlap = foyer_storage_disk_io_overlap.counter(&[name.clone(), "write".into()]);
+        let storage_disk_read_overlap = foyer_storage_disk_io_overlap.counter(&[name.clone(), "read".into()]);
 
         let storage_disk_write_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "write".into()]);
         let storage_disk_read_duration = foyer_storage_disk_io_duration.histogram(&[name.clone(), "read".into()]);
@@ -332,6 +407,14 @@ impl Metrics {
             storage_delete,
             storage_error,
             storage_false_positive,
+            storage_admission_forced,
+            storage_admission_admitted,
+            storage_admission_rejected,
+            storage_admission_throttled,
+            storage_admission_forced_bytes,
+            storage_admission_admitted_bytes,
+            storage_admission_rejected_bytes,
+            storage_admission_throttled_bytes,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,
@@ -341,11 +424,20 @@ impl Metrics {
             storage_queue_rotate_duration,
             storage_queue_buffer_overflow,
             storage_queue_channel_overflow,
+            storage_queue_buffer_overflow_bytes,
+            storage_queue_channel_overflow_bytes,
+            storage_queue_enqueue_skip_bytes,
+            storage_queue_size_bytes,
             storage_disk_write,
             storage_disk_read,
             storage_disk_flush,
             storage_disk_write_bytes,
             storage_disk_read_bytes,
+            storage_disk_write_inflight,
+            storage_disk_read_inflight,
+            storage_disk_combined_inflight,
+            storage_disk_write_overlap,
+            storage_disk_read_overlap,
             storage_disk_write_duration,
             storage_disk_read_duration,
             storage_disk_flush_duration,

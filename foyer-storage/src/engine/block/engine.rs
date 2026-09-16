@@ -585,12 +585,20 @@ where
             Age::Young => {
                 // skip write block engine if the entry is still young
                 self.inner.metrics.storage_block_engine_enqueue_skip.increase(1);
+                self.inner
+                    .metrics
+                    .storage_queue_enqueue_skip_bytes
+                    .increase(estimated_size as u64);
                 return;
             }
         }
 
         if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
             self.inner.metrics.storage_queue_channel_overflow.increase(1);
+            self.inner
+                .metrics
+                .storage_queue_channel_overflow_bytes
+                .increase(estimated_size as u64);
             return;
         }
 

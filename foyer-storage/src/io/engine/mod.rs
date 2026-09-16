@@ -47,7 +47,6 @@ type IoHandleInner = InSpan<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>>;
 pub struct IoHandle {
     #[pin]
     inner: IoHandleInner,
-    callback: Option<Box<dyn FnOnce() + Send + 'static>>,
 }
 
 impl Debug for IoHandle {
@@ -59,7 +58,7 @@ impl Debug for IoHandle {
 #[cfg(not(feature = "tracing"))]
 impl From<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>> for IoHandle {
     fn from(inner: BoxFuture<'static, (Box<dyn IoB>, Result<()>)>) -> Self {
-        Self { inner, callback: None }
+        Self { inner }
     }
 }
 
@@ -67,18 +66,7 @@ impl From<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>> for IoHandle {
 impl From<BoxFuture<'static, (Box<dyn IoB>, Result<()>)>> for IoHandle {
     fn from(inner: BoxFuture<'static, (Box<dyn IoB>, Result<()>)>) -> Self {
         let inner = inner.in_span(Span::enter_with_local_parent("foyer::storage::io::io_handle"));
-        Self { inner, callback: None }
-    }
-}
-
-impl IoHandle {
-    pub(crate) fn with_callback<F>(mut self, callback: F) -> Self
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        assert!(self.callback.is_none(), "io handle callback can only be set once");
-        self.callback = Some(Box::new(callback));
-        self
+        Self { inner }
     }
 }
 
@@ -87,11 +75,7 @@ impl Future for IoHandle {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let res = ready!(this.inner.poll(cx));
-        if let Some(callback) = this.callback.take() {
-            callback();
-        }
-        Poll::Ready(res)
+        Poll::Ready(ready!(this.inner.poll(cx)))
     }
 }
 
