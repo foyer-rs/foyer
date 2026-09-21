@@ -6,6 +6,7 @@ members = [
   "foyer-bench",
   "foyer-common",
   "foyer-memory",
+  "foyer-opendal",
   "foyer-storage",
   "foyer-tokio",
   "xtask",
@@ -51,6 +52,7 @@ fastrace-opentelemetry = { version = "0.18.1" }
 foyer = { version = "0.22.6", path = "foyer", default-features = false }
 foyer-common = { version = "0.22.6", path = "foyer-common", default-features = false }
 foyer-memory = { version = "0.22.6", path = "foyer-memory", default-features = false }
+foyer-opendal = { version = "0.22.6", path = "foyer-opendal", default-features = false }
 foyer-storage = { version = "0.22.6", path = "foyer-storage", default-features = false }
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
