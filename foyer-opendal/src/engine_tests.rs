@@ -14,6 +14,8 @@
 
 //! Crate-local engine tests. HeldEngine is a test double, not a public API.
 
+#[cfg(feature = "test-redis")]
+use std::time::Instant;
 use std::{
     future::Future,
     hash::BuildHasher,
@@ -23,9 +25,6 @@ use std::{
     },
     time::Duration,
 };
-
-#[cfg(feature = "test-redis")]
-use std::time::Instant;
 
 use anyhow::Result;
 use foyer::{
@@ -312,8 +311,10 @@ fn redis_url() -> String {
 
 #[cfg(feature = "test-redis")]
 fn redis_cmd(args: &[&str]) -> Result<String> {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+    };
 
     let url = redis_url();
     let addr = url.strip_prefix("redis://").unwrap_or(&url);
