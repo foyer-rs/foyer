@@ -1426,12 +1426,12 @@ async fn redis_in_flight_write_retains_one_registration() -> Result<()> {
         &vec![7; 4096]
     );
     assert_eq!(cache.statistics().disk_read_ios(), 0);
-    assert!(!fx.op.exists(&object_for(&fx.namespace, "object/v1", 1)).await?);
     assert_eq!(cache.statistics().disk_write_ios(), 0);
     drop(_unpause);
     redis_cmd(&["CLIENT", "UNPAUSE"])?;
     cache.storage().wait().await;
     assert_eq!(cache.statistics().disk_write_ios(), 1);
+    assert!(fx.op.exists(&object_for(&fx.namespace, "object/v1", 1)).await?);
     cache.close().await?;
     Ok(())
 }
