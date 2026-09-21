@@ -81,10 +81,11 @@ envelope. Not a generic foyer codec or recovery format.
 | 20 + `key_len` | `value_len` | value bytes |
 
 Encoded size is `20 + key_len + value_len`. The engine estimates with that
-header length and reads at most `max_object_size + 1` bytes. Decode checks the
-buffer against `max_object_size` before trusting length fields, then requires
-exact framing, magic, checksum, and a full match with the requested key. A
-failed object returns an error and no value bytes.
+header length. A read accumulates at most `max_object_size + 1` bytes in the
+engine `Vec`; OpenDAL buffers, backend buffers, and process RSS are not
+capped. Decode checks the buffer against `max_object_size` before trusting
+length fields, then requires exact framing, magic, checksum, and a full match
+with the requested key. A failed object returns an error and no value bytes.
 
 ## Why Keeper identity is needed
 
