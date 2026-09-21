@@ -221,10 +221,11 @@ impl Shared {
         }
     }
 
-    /// Stream from offset 0 and stop after `max_object_size + 1` bytes.
+    /// Stream from offset 0 and accumulate at most `max_object_size + 1` bytes
+    /// in the engine `Vec`.
     ///
     /// A closed range past the object size is `RangeNotSatisfied` on Fs and Redis.
-    /// An unbounded reader does not trust declared length and cannot grow without bound.
+    /// OpenDAL buffers, backend buffers, and process RSS are not capped.
     async fn read_capped(&self, path: &str) -> opendal_core::Result<Vec<u8>> {
         let reader = self.op.reader(path).await?;
         let mut stream = reader.into_stream(..).await?;
@@ -438,10 +439,13 @@ impl OpenDalEngineConfig {
         }
     }
 
-    /// Limit one encoded object, and therefore one write or read buffer, to `bytes`.
+    /// Limit one encoded object to `bytes`.
     ///
     /// Compared with the encoded object only; the queue's 64-byte minimum charge
-    /// does not apply. Must be nonzero and at most `capacity`. Defaults to `capacity`.
+    /// does not apply. A read may accumulate at most `bytes + 1` in the engine
+    /// `Vec` so an oversized object can be rejected. OpenDAL buffers, backend
+    /// buffers, and process RSS are not capped. Must be nonzero and at most
+    /// `capacity`. Defaults to `capacity`.
     pub fn with_max_object_size(mut self, bytes: usize) -> Self {
         self.max_object_size = Some(bytes);
         self
