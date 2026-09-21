@@ -24,7 +24,7 @@ use foyer_common::{
 use foyer_memory::Piece;
 use futures_core::future::BoxFuture;
 
-use crate::{Device, filter::StorageFilterResult, io::engine::IoEngine, keeper::PieceRef};
+use crate::{Device, Statistics, filter::StorageFilterResult, io::engine::IoEngineConfig, keeper::PieceRef};
 
 /// Source context for populated entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,10 +120,18 @@ pub enum RecoverMode {
     Strict,
 }
 
-/// Context for building the disk cache engine.
+/// Context for building a secondary-cache engine.
+///
+/// Engines that use block I/O build `io_engine_config` with an
+/// [`crate::IoEngineBuildContext`] using the supplied spawner. Engines with an
+/// independent storage client leave it unused. This replaces the previously
+/// eagerly constructed `io_engine` field.
 pub struct EngineBuildContext {
-    /// IO engine for the disk cache engine.
-    pub io_engine: Arc<dyn IoEngine>,
+    /// Configuration for engines that use block I/O.
+    ///
+    /// Construction is owned by the consuming engine. Engines with their own
+    /// storage client can ignore this configuration without starting block I/O.
+    pub io_engine_config: Box<dyn IoEngineConfig>,
     /// Shared metrics for all components.
     pub metrics: Arc<Metrics>,
     /// The runtime for the disk cache engine.
@@ -152,15 +160,28 @@ where
     }
 }
 
-/// Disk cache engine trait.
+/// Secondary-cache engine trait.
+///
+/// Implementations own their storage I/O statistics independently of whether
+/// they use a block device. When migrating a block-based implementation, return
+/// its device statistics from [`Engine::statistics`] and wrap the device in
+/// `Some` from [`Engine::device`]. Other engines can keep the default `None`.
 pub trait Engine<K, V, P>: Send + Sync + 'static + Debug + Any
 where
     K: StorageKey,
     V: StorageValue,
     P: Properties,
 {
-    /// Get the device used by this disk cache engine.
-    fn device(&self) -> &Arc<dyn Device>;
+    /// Get the block device, if this engine uses one.
+    fn device(&self) -> Option<&Arc<dyn Device>> {
+        None
+    }
+
+    /// Get this engine's I/O statistics and throttle configuration.
+    ///
+    /// Block engines return their device statistics. Other engines own and
+    /// update these counters for their storage operations without a device.
+    fn statistics(&self) -> &Arc<Statistics>;
 
     /// Return if the given key can be picked by the disk cache engine.
     fn filter(&self, hash: u64, estimated_size: usize) -> StorageFilterResult;
