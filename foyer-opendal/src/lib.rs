@@ -62,7 +62,7 @@ use foyer_storage::{
     Engine, EngineBuildContext, EngineConfig, Load, PieceRef, Populated, RecoverMode, Statistics, StorageFilterResult,
     Throttle,
 };
-use futures_util::future::BoxFuture;
+use futures_util::{StreamExt, future::BoxFuture};
 use opendal_core::Operator;
 use parking_lot::Mutex;
 use tokio::sync::{Semaphore, mpsc, oneshot};
@@ -104,13 +104,6 @@ fn queue_charge(encoded: usize, queue_limit: usize) -> usize {
     } else {
         encoded.max(MIN_CHARGE).min(queue_limit)
     }
-}
-
-fn read_bound(max_object_size: usize) -> u64 {
-    u64::try_from(max_object_size)
-        .ok()
-        .and_then(|n| n.checked_add(1))
-        .unwrap_or(u64::MAX)
 }
 
 fn object_path(namespace: &str, hash: u64, sequence: u64) -> String {
@@ -226,6 +219,38 @@ impl Shared {
         for path in paths {
             self.request_delete(tx, path);
         }
+    }
+
+    /// Stream from offset 0 and stop after `max_object_size + 1` bytes.
+    ///
+    /// A closed range past the object size is `RangeNotSatisfied` on Fs and Redis.
+    /// An unbounded reader does not trust declared length and cannot grow without bound.
+    async fn read_capped(&self, path: &str) -> opendal_core::Result<Vec<u8>> {
+        let reader = self.op.reader(path).await?;
+        let mut stream = reader.into_stream(..).await?;
+        let cap = self.max_object_size.saturating_add(1);
+        let mut bytes = Vec::new();
+        loop {
+            if bytes.len() >= cap {
+                break;
+            }
+            match stream.next().await {
+                Some(Ok(buf)) => {
+                    for chunk in buf {
+                        let remain = cap - bytes.len();
+                        if remain == 0 {
+                            break;
+                        }
+                        let n = remain.min(chunk.len());
+                        bytes.extend_from_slice(&chunk[..n]);
+                    }
+                }
+                Some(Err(e)) if e.kind() == opendal_core::ErrorKind::RangeNotSatisfied => break,
+                Some(Err(e)) => return Err(e),
+                None => break,
+            }
+        }
+        Ok(bytes)
     }
 
     async fn delete_object(&self, path: &str) {
@@ -613,21 +638,17 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 Ok(Err(_)) => return Err(external("read semaphore closed")),
                 Err(_) => return Ok(Load::Throttled),
             };
-            let limit = read_bound(shared.max_object_size);
-            let bytes = match tokio::time::timeout(shared.timeout, async {
-                shared.op.read_with(&object.path).range(0..limit).await
-            })
-            .await
-            {
-                Ok(Ok(bytes)) => bytes.to_vec(),
-                Ok(Err(e)) if e.kind() == opendal_core::ErrorKind::NotFound => {
-                    drop(permit);
-                    shared.forget_object(hash, object.sequence);
-                    return Ok(Load::Miss);
-                }
-                Ok(Err(e)) => return Err(external(e.to_string())),
-                Err(e) => return Err(external(e.to_string())),
-            };
+            let bytes =
+                match tokio::time::timeout(shared.timeout, async { shared.read_capped(&object.path).await }).await {
+                    Ok(Ok(bytes)) => bytes,
+                    Ok(Err(e)) if e.kind() == opendal_core::ErrorKind::NotFound => {
+                        drop(permit);
+                        shared.forget_object(hash, object.sequence);
+                        return Ok(Load::Miss);
+                    }
+                    Ok(Err(e)) => return Err(external(e.to_string())),
+                    Err(e) => return Err(external(e.to_string())),
+                };
             drop(permit);
             if bytes.len() > shared.max_object_size {
                 if let Some(object) = shared.forget_object(hash, object.sequence) {
