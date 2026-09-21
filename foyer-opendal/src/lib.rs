@@ -325,10 +325,10 @@ impl Shared {
 
     fn publish(&self, hash: u64, sequence: u64, key: String, path: String, size: usize) -> Vec<String> {
         let mut state = self.state.lock();
-        if !state
+        if state
             .pending
             .get(&hash)
-            .is_some_and(|pending| pending.sequence == sequence)
+            .is_none_or(|pending| pending.sequence != sequence)
         {
             return vec![path];
         }
