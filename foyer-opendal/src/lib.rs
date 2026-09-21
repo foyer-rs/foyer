@@ -788,5 +788,5 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod engine_tests;

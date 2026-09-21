@@ -1404,22 +1404,18 @@ async fn redis_in_flight_write_retains_one_registration() -> Result<()> {
     let _guard = serialize_kind(Kind::Redis);
     let (config, fx) = engine_config(Kind::Redis, "in-flight", 1 << 20, 8192)?;
     let cache = build(config).await?;
-    redis_cmd(&["CLIENT", "PAUSE", "1000", "ALL"])?;
+    // Pause writes long enough for keeper assertions, but shorter than the 2s I/O timeout
+    // so UNPAUSE still lets the in-flight write complete.
+    redis_cmd(&["CLIENT", "PAUSE", "1800", "ALL"])?;
     let _unpause = RedisPause;
     drop(cache.insert("object/v1".into(), vec![7; 4096]));
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while !cache.storage().may_contains(&"object/v1".to_string()) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await?;
+    tokio::task::yield_now().await;
+    assert!(cache.storage().may_contains(&"object/v1".to_string()));
     for _ in 0..32 {
         drop(
             cache
                 .get_or_fetch(&"object/v1".to_string(), || async {
-                    anyhow::bail!("in-flight cache value must remain available");
-                    #[allow(unreachable_code)]
-                    Ok::<Vec<u8>, anyhow::Error>(vec![])
+                    Err(anyhow::anyhow!("in-flight cache value must remain available"))
                 })
                 .await?,
         );
