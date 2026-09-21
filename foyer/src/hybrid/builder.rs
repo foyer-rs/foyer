@@ -257,6 +257,8 @@ where
     S: HashBuilder + Debug,
 {
     /// Set io engine config for the disk cache store.
+    /// Engines that use block I/O construct this configuration when they build.
+    /// Engines with their own storage client do not construct it.
     pub fn with_io_engine_config(self, config: impl Into<Box<dyn IoEngineConfig>>) -> Self {
         let builder = self.builder.with_io_engine_config(config);
         Self {
