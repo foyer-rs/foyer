@@ -23,7 +23,7 @@ use futures_core::future::BoxFuture;
 use futures_util::FutureExt;
 
 use crate::{
-    Device, DeviceBuilder, Load, NoopDeviceBuilder, StorageFilterResult,
+    Load, Statistics, StorageFilterResult, Throttle,
     engine::{Engine, EngineBuildContext, EngineConfig},
     keeper::PieceRef,
 };
@@ -63,10 +63,8 @@ where
     P: Properties,
 {
     pub fn build(self) -> Arc<NoopEngine<K, V, P>> {
-        let device = NoopDeviceBuilder::default().build().unwrap();
-        let device: Arc<dyn Device> = device;
         Arc::new(NoopEngine {
-            device,
+            statistics: Arc::new(Statistics::new(Throttle::default())),
             marker: PhantomData,
         })
     }
@@ -100,7 +98,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    device: Arc<dyn Device>,
+    statistics: Arc<Statistics>,
     marker: PhantomData<(K, V, P)>,
 }
 
@@ -121,8 +119,8 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn device(&self) -> &Arc<dyn Device> {
-        &self.device
+    fn statistics(&self) -> &Arc<Statistics> {
+        &self.statistics
     }
 
     fn filter(&self, _: u64, _: usize) -> StorageFilterResult {
