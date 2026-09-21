@@ -614,17 +614,20 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 Err(_) => return Ok(Load::Throttled),
             };
             let limit = read_bound(shared.max_object_size);
-            let bytes =
-                match tokio::time::timeout(shared.timeout, shared.op.read_with(&object.path).range(0..limit)).await {
-                    Ok(Ok(bytes)) => bytes.to_vec(),
-                    Ok(Err(e)) if e.kind() == opendal_core::ErrorKind::NotFound => {
-                        drop(permit);
-                        shared.forget_object(hash, object.sequence);
-                        return Ok(Load::Miss);
-                    }
-                    Ok(Err(e)) => return Err(external(e.to_string())),
-                    Err(e) => return Err(external(e.to_string())),
-                };
+            let bytes = match tokio::time::timeout(shared.timeout, async {
+                shared.op.read_with(&object.path).range(0..limit).await
+            })
+            .await
+            {
+                Ok(Ok(bytes)) => bytes.to_vec(),
+                Ok(Err(e)) if e.kind() == opendal_core::ErrorKind::NotFound => {
+                    drop(permit);
+                    shared.forget_object(hash, object.sequence);
+                    return Ok(Load::Miss);
+                }
+                Ok(Err(e)) => return Err(external(e.to_string())),
+                Err(e) => return Err(external(e.to_string())),
+            };
             drop(permit);
             if bytes.len() > shared.max_object_size {
                 if let Some(object) = shared.forget_object(hash, object.sequence) {
