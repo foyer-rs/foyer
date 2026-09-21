@@ -49,3 +49,19 @@ fn is_relative_exclusive_prefix(namespace: &str) -> bool {
         .split('/')
         .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
 }
+
+#[cfg(test)]
+mod tests {
+    use foyer::ErrorKind;
+
+    use super::validate;
+
+    #[test]
+    fn namespace_validate_rejects_unusable_paths() {
+        validate("cache").unwrap();
+        validate("run/exclusive").unwrap();
+        for bad in ["", "/", "a//b", ".", "..", "a/../b", "/abs", "a/./b", "a\\b", " ns"] {
+            assert_eq!(validate(bad).unwrap_err().kind(), ErrorKind::Config, "{bad}");
+        }
+    }
+}

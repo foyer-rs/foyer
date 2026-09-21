@@ -189,3 +189,91 @@ fn crc32(parts: &[&[u8]]) -> u32 {
     }
     !crc
 }
+
+/// Header that claims `u32::MAX` value bytes so decode must reject it by framing.
+#[cfg(test)]
+pub(crate) fn claimed_huge_value(key: &str) -> Vec<u8> {
+    let mut bytes = MAGIC.to_vec();
+    bytes.extend_from_slice(&u32::try_from(key.len()).unwrap().to_le_bytes());
+    bytes.extend_from_slice(&u32::MAX.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(key.as_bytes());
+    bytes.extend_from_slice(&[1, 2, 3]);
+    bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer::ErrorKind;
+
+    use super::*;
+
+    fn assert_reject(err: foyer::Error) {
+        assert!(
+            matches!(
+                err.kind(),
+                ErrorKind::Parse
+                    | ErrorKind::OutOfRange
+                    | ErrorKind::BufferSizeLimit
+                    | ErrorKind::MagicMismatch
+                    | ErrorKind::ChecksumMismatch
+                    | ErrorKind::Config
+            ),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn encode_decode_round_trip_and_object_bound() {
+        let key = "dataset-a/object-42/version-7/bytes-0-8";
+        let value = b"abcdefgh";
+        let bytes = encode(key, value, 128).expect("round trip must fit");
+        assert!(bytes.len() <= 128);
+        assert_eq!(&bytes[..8], b"FODL0001");
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize, key.len());
+        assert_eq!(
+            u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize,
+            value.len()
+        );
+        assert_eq!(decode(&bytes, key, 128).expect("matching key"), value);
+        assert_reject(decode(&bytes, "other/v1", 128).unwrap_err());
+        assert_reject(encode(key, value, 8).unwrap_err());
+    }
+
+    #[test]
+    fn encoded_size_is_header_plus_key_plus_value() {
+        assert_eq!(encode("", b"", 20).unwrap().len(), 20);
+        assert_eq!(encode("a", b"", 21).unwrap().len(), 21);
+        assert_eq!(encode("a", &[0; 3], 24).unwrap().len(), 24);
+        assert_reject(encode("a", b"", 20).unwrap_err());
+        assert_reject(encode("a", &[0; 4], 24).unwrap_err());
+        assert_eq!(decode(&encode("", b"", 20).unwrap(), "", 20).unwrap(), b"");
+    }
+
+    #[test]
+    fn decode_rejects_malformed_framing_without_trusting_length_fields() {
+        let key = "object/v1";
+        let bytes = encode(key, b"ok", 64).unwrap();
+
+        assert_reject(decode(b"FOYODL01", key, 64).unwrap_err());
+        assert_reject(decode(b"FODL0001", key, 64).unwrap_err());
+        let mut old = b"FOYODL01".to_vec();
+        old.resize(20, 0);
+        assert_reject(decode(&old, key, 64).unwrap_err());
+        assert_reject(decode(&[0; 20], key, 64).unwrap_err());
+
+        let mut extra = bytes.clone();
+        extra.push(0);
+        assert_reject(decode(&extra, key, 64).unwrap_err());
+
+        let mut bad_crc = bytes.clone();
+        bad_crc[16] ^= 0xff;
+        assert_eq!(
+            decode(&bad_crc, key, 64).unwrap_err().kind(),
+            ErrorKind::ChecksumMismatch
+        );
+
+        assert_reject(decode(&claimed_huge_value(key), key, 64).unwrap_err());
+        assert_reject(decode(&bytes, key, bytes.len() - 1).unwrap_err());
+    }
+}

@@ -787,3 +787,6 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
         })
     }
 }
+
+#[cfg(test)]
+mod engine_tests;
