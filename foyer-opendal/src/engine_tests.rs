@@ -1404,9 +1404,9 @@ async fn redis_in_flight_write_retains_one_registration() -> Result<()> {
     let _guard = serialize_kind(Kind::Redis);
     let (config, fx) = engine_config(Kind::Redis, "in-flight", 1 << 20, 8192)?;
     let cache = build(config).await?;
-    // Pause writes long enough for keeper assertions, but shorter than the 2s I/O timeout
-    // so UNPAUSE still lets the in-flight write complete.
-    redis_cmd(&["CLIENT", "PAUSE", "1800", "ALL"])?;
+    // Pause writes only. CLIENT PAUSE ALL would also queue EXISTS/GET, so the
+    // in-flight SET can complete before those probes run.
+    redis_cmd(&["CLIENT", "PAUSE", "1800", "WRITE"])?;
     let _unpause = RedisPause;
     drop(cache.insert("object/v1".into(), vec![7; 4096]));
     tokio::task::yield_now().await;
