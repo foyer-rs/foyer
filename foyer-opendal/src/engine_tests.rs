@@ -1415,7 +1415,7 @@ async fn redis_in_flight_write_retains_one_registration() -> Result<()> {
         drop(
             cache
                 .get_or_fetch(&"object/v1".to_string(), || async {
-                    Err(anyhow::anyhow!("in-flight cache value must remain available"))
+                    Err::<Vec<u8>, _>(anyhow::anyhow!("in-flight cache value must remain available"))
                 })
                 .await?,
         );
