@@ -87,6 +87,24 @@ capped. Decode checks the buffer against `max_object_size` before trusting
 length fields, then requires exact framing, magic, checksum, and a full match
 with the requested key. A failed object returns an error and no value bytes.
 
+## Tests
+
+Filesystem tests need no extra services:
+
+```sh
+cargo test -p foyer-opendal
+```
+
+Redis tests compile only with `--features test-redis` and need a Redis 6+ server.
+`CLIENT PAUSE` is process-wide, so run that suite on one thread:
+
+```sh
+FOYER_OPENDAL_REDIS_URL=redis://127.0.0.1:6379 cargo test -p foyer-opendal --features test-redis -- --test-threads=1
+```
+
+CI runs the Redis suite against a Redis 6 service. A skipped Redis test is not
+counted as Redis validation.
+
 ## Why Keeper identity is needed
 
 Several callers can submit the same immutable entry while its write is pending.
