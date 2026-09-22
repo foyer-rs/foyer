@@ -73,6 +73,12 @@ impl FsDeviceBuilder {
         self.direct = direct;
         self
     }
+
+    fn default_capacity(&self) -> Result<usize> {
+        // Create an empty directory before to get free space.
+        create_dir_all(&self.dir).map_err(Error::io_error)?;
+        Ok(free_space(&self.dir).map_err(Error::io_error)? as usize / 10 * 8)
+    }
 }
 
 impl DeviceBuilder for FsDeviceBuilder {
@@ -81,11 +87,7 @@ impl DeviceBuilder for FsDeviceBuilder {
 
         let align_v = |value: usize, align: usize| value - value % align;
 
-        let capacity = self.capacity.unwrap_or({
-            // Create an empty directory before to get free space.
-            create_dir_all(&self.dir).unwrap();
-            free_space(&self.dir).unwrap() as usize / 10 * 8
-        });
+        let capacity = self.capacity.map_or_else(|| self.default_capacity(), Ok)?;
         let capacity = align_v(capacity, PAGE);
 
         let statistics = Arc::new(Statistics::new(self.throttle));
@@ -174,6 +176,19 @@ impl Device for FsDevice {
 
     fn statistics(&self) -> &Arc<Statistics> {
         &self.statistics
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer_common::error::ErrorKind;
+
+    use super::*;
+
+    #[test]
+    fn test_fs_device_builder_propagates_dir_creation_errors() {
+        let err = FsDeviceBuilder::new("foo\0bar").build().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Io);
     }
 }
 
