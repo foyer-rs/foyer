@@ -232,7 +232,7 @@ impl PageBuffer {
         let mut partition = 0;
 
         loop {
-            let partition_pages = self.partitions[partition].size() as u32 / PAGE as u32;
+            let partition_pages = (self.partitions[partition].size() / PAGE) as u32;
             if page < partition_pages {
                 break (partition, PAGE as u64 * page as u64);
             }
@@ -310,6 +310,21 @@ mod tests {
             assert_eq!(inner.slot, (3 * 1024 + 42 + 1) % (TombstoneLog::SLOTS_PER_PAGE * 4));
             let (page, _) = log.slot_addr(inner.slot);
             assert_eq!(inner.buffer.page, page);
+        }
+    }
+
+    #[test]
+    fn test_partition_pages_no_u32_truncation() {
+        for tib in 1..=10usize {
+            let capacity = tib * 1024 * 1024 * 1024 * 1024;
+            let partition = capacity / 256;
+
+            assert_eq!(partition as u32, 0, "precondition: {tib} TiB partition truncates to 0");
+
+            let buggy = partition as u32 / PAGE as u32;
+            let fixed = (partition / PAGE) as u32;
+            assert_eq!(buggy, 0, "{tib} TiB: old code truncated to 0 pages");
+            assert!(fixed > 0, "{tib} TiB partition must have a non-zero page count");
         }
     }
 }
