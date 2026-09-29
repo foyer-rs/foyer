@@ -909,6 +909,26 @@ where
         }
     }
 
+    /// Evict entries matching the predicate and offload them into the disk cache via the pipe if needed.
+    ///
+    /// This function obeys the io throttler of the disk cache and makes sure all matching entries are offloaded.
+    /// Therefore, this function is asynchronous.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::cache::flush_if"))]
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.flush_if(predicate).await,
+            Cache::S3Fifo(cache) => cache.flush_if(predicate).await,
+            Cache::Lru(cache) => cache.flush_if(predicate).await,
+            Cache::Lfu(cache) => cache.flush_if(predicate).await,
+            Cache::Sieve(cache) => cache.flush_if(predicate).await,
+        }
+    }
+
     /// Return a new hybrid cache with the given pipe.
     #[doc(hidden)]
     pub fn with_pipe(self, pipe: ArcPipe<K, V, P>) -> Self {
@@ -1267,6 +1287,27 @@ mod tests {
             .collect_vec();
 
         join_all(handles).await;
+    }
+
+    #[test]
+    fn test_reinsert_resident_piece() {
+        for pin in [false, true] {
+            let cache: Cache<u64, u64> = CacheBuilder::new(2).with_shards(1).build();
+            let entry = cache.insert(1, 1);
+            drop(cache.insert(2, 2));
+            let pinned = pin.then(|| cache.get(&1).unwrap());
+            let refs = entry.refs();
+            let reinserted = cache.insert_piece(entry.piece());
+            assert_eq!(entry.refs(), refs + 1);
+            assert_eq!(cache.usage(), 2);
+            assert_eq!(*reinserted.value(), 1);
+            assert!(cache.contains(&2));
+            drop((entry, pinned, reinserted));
+            let entry = cache.get(&1).unwrap();
+            assert_eq!(entry.refs(), 1);
+            drop(entry);
+            cache.clear();
+        }
     }
 
     #[tokio::test]

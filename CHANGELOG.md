@@ -9,6 +9,84 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
+## 2026-09-09
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.6 |
+| foyer-tokio | 0.22.6 |
+| foyer-common | 0.22.6 |
+| foyer-memory | 0.22.6 |
+| foyer-storage | 0.22.6 |
+| foyer-bench | 0.22.6 |
+
+### Changes
+
+Features and enhancements:
+
+- Export `PieceRef` so downstream crates can implement the `Engine` trait. [#1330](https://github.com/foyer-rs/foyer/pull/1330)
+
+Fixes:
+
+- Fix musl builds by using platform-appropriate ioctl request types for device capacity detection. [#1342](https://github.com/foyer-rs/foyer/pull/1342)
+- Check the keeper in `Store::may_contains()` so entries still in flight can be reported before they reach the engine index. [#1337](https://github.com/foyer-rs/foyer/pull/1337)
+- Make `HybridCache::is_hybrid()` return `false` when no storage engine is configured, so callers can correctly guard disk-cache operations such as `flush_if()`. [#1343](https://github.com/foyer-rs/foyer/pull/1343)
+
+## 2026-09-07
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.5 |
+| foyer-tokio | 0.22.5 |
+| foyer-common | 0.22.5 |
+| foyer-memory | 0.22.5 |
+| foyer-storage | 0.22.5 |
+| foyer-bench | 0.22.5 |
+
+### Changes
+
+Fixes:
+
+- Reset pinned state when removing or clearing LRU records so reinserting a retained record preserves eviction list membership and priority weights. [#1339](https://github.com/foyer-rs/foyer/pull/1339)
+- Reuse records already resident in memory when concurrent fetches return the same retained record, preserving reference counts and other cached entries. [#1339](https://github.com/foyer-rs/foyer/pull/1339)
+
+Dependencies:
+
+- Upgrade asyncband to 0.7.1 with explicit barrier, mpsc, mutex, and oneshot features. [#1340](https://github.com/foyer-rs/foyer/pull/1340)
+
+## 2026-08-31
+
+### Release
+
+| crate | version |
+| - | - |
+| foyer | 0.22.4 |
+| foyer-tokio | 0.22.4 |
+| foyer-common | 0.22.4 |
+| foyer-memory | 0.22.4 |
+| foyer-storage | 0.22.4 |
+| foyer-bench | 0.22.4 |
+
+### Changes
+
+Features and enhancements:
+
+- Support selectively flushing matching entries from memory to storage with `Cache::flush_if()` and `HybridCache::flush_if()`. [#1320](https://github.com/foyer-rs/foyer/pull/1320)
+- Expose false-positive storage metrics. [#1261](https://github.com/foyer-rs/foyer/pull/1261)
+- Re-export `SieveConfig` from the `foyer` prelude. [#1285](https://github.com/foyer-rs/foyer/pull/1285)
+- Make `Throttle` constructors and builder methods usable in const contexts. [#1303](https://github.com/foyer-rs/foyer/pull/1303)
+
+Fixes:
+
+- Fix default file-device capacity detection for block devices. [#1271](https://github.com/foyer-rs/foyer/pull/1271)
+- Delete stale storage entries when admission rejects an update. [#1270](https://github.com/foyer-rs/foyer/pull/1270)
+- Fix stale tracing and debug information names. [#1276](https://github.com/foyer-rs/foyer/pull/1276)
+- Fix builds in Bazel sandboxed environments. [#1274](https://github.com/foyer-rs/foyer/pull/1274)
+
 ## 2026-01-23
 
 ### Release

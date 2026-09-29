@@ -40,6 +40,18 @@ where
     }
 }
 
+impl<E> HashTableIndexer<E>
+where
+    E: Eviction,
+{
+    pub(crate) fn extract_if<'a, F>(&'a mut self, mut predicate: F) -> impl Iterator<Item = Arc<Record<E>>> + 'a
+    where
+        F: FnMut(&Arc<Record<E>>) -> bool + 'a,
+    {
+        self.table.extract_if(move |record| predicate(record))
+    }
+}
+
 impl<E> Indexer for HashTableIndexer<E>
 where
     E: Eviction,
