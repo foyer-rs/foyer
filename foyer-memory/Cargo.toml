@@ -13,7 +13,6 @@ readme.workspace = true
 exclude.workspace = true
 
 [features]
-default = ["tokio/runtime-tokio"]
 nightly = ["hashbrown/nightly"]
 test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]

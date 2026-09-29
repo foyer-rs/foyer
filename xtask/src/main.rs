@@ -213,20 +213,6 @@ fn license() {
     run("license-eye header check");
 }
 
-fn madsim() {
-    run_with_env(
-        r#"cargo check -p foyer --no-default-features --features "runtime-madsim-tokio""#,
-        [("RUSTFLAGS", r#"--cfg madsim --cfg tokio_unstable"#)],
-    );
-    run_with_env(
-        r#"cargo nextest run --workspace --exclude foyer-bench --exclude examples --no-default-features --features "runtime-madsim-tokio""#,
-        [
-            ("RUSTFLAGS", r#"--cfg madsim --cfg tokio_unstable"#),
-            ("RUST_BACKTRACE", "1"),
-        ],
-    );
-}
-
 fn msrv() {
     run("cargo +1.91.0 fmt --all");
     run("cargo +1.91.0 clippy --all-targets --features deadlock");
@@ -304,8 +290,6 @@ enum Command {
     Udeps,
     /// Check licenses headers.
     License,
-    /// Run checks and tests with madsim.
-    Madsim,
     /// Run checks and tests with MSRV toolchain.
     Msrv,
     /// Minimize Grafana Dashboard json files.
@@ -334,7 +318,6 @@ fn main() {
         Command::Example => example(),
         Command::Udeps => udeps(),
         Command::License => license(),
-        Command::Madsim => madsim(),
         Command::Msrv => msrv(),
         Command::Json(args) => json(args.check),
         Command::Monitor(cmd) => monitor::run(cmd),

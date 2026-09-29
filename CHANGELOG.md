@@ -16,7 +16,6 @@ date: 2023-05-12T11:02:09+08:00
 | crate | version |
 | - | - |
 | foyer | 0.22.6 |
-| foyer-tokio | 0.22.6 |
 | foyer-common | 0.22.6 |
 | foyer-memory | 0.22.6 |
 | foyer-storage | 0.22.6 |
@@ -41,7 +40,6 @@ Fixes:
 | crate | version |
 | - | - |
 | foyer | 0.22.5 |
-| foyer-tokio | 0.22.5 |
 | foyer-common | 0.22.5 |
 | foyer-memory | 0.22.5 |
 | foyer-storage | 0.22.5 |
@@ -65,7 +63,6 @@ Dependencies:
 | crate | version |
 | - | - |
 | foyer | 0.22.4 |
-| foyer-tokio | 0.22.4 |
 | foyer-common | 0.22.4 |
 | foyer-memory | 0.22.4 |
 | foyer-storage | 0.22.4 |
@@ -94,7 +91,6 @@ Fixes:
 | crate | version |
 | - | - |
 | foyer | 0.22.3 |
-| foyer-tokio | 0.22.3 |
 | foyer-common | 0.22.3 |
 | foyer-memory | 0.22.3 |
 | foyer-storage | 0.22.3 |
@@ -127,7 +123,6 @@ Fixes:
 | crate | version |
 | - | - |
 | foyer | 0.22.2 |
-| foyer-tokio | 0.22.2 |
 | foyer-common | 0.22.2 |
 | foyer-memory | 0.22.2 |
 | foyer-storage | 0.22.2 |
@@ -144,7 +139,6 @@ Fixes:
 | crate | version |
 | - | - |
 | foyer | 0.22.1 |
-| foyer-tokio | 0.22.1 |
 | foyer-common | 0.22.1 |
 | foyer-memory | 0.22.1 |
 | foyer-storage | 0.22.1 |
@@ -168,7 +162,6 @@ Changes:
 - Align io engine and engine config naming. All items that need to be built by the user are named `..Builder`, and all items built by foyer are named `..Config`. [#1232](https://github.com/foyer-rs/foyer/pull/1232)
 - Support get memory entry count via API and metrics.
 - Fix LRU high priority weight calculation.
-- Update dependencies. Drop [`madsim`](https://crates.io/crates/madsim) dependency when it is not needed.
 
 ## 2025-12-12
 
@@ -713,7 +706,6 @@ Options:
 
 ### Changes
 
-- Use `tokio-rs/tokio` by default as the runtime, use `madsim-tokio` when `madsim` configuration is enabled.
 - Optimize dependencies.
 
 ## 2025-01-14
@@ -805,7 +797,6 @@ Options:
 ### Changes
 
 - Downgrade hashbrown to 0.14 to fix build on nightly for projects using hashbrown < 0.15.
-- Fix build with madsim.
 - Refine small object disk cache.
 - Scale shards to 1 when there is not enough capacity.
 

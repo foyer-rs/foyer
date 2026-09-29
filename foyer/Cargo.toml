@@ -21,7 +21,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 development = ["jiff"]
 
 [features]
-default = ["runtime-tokio"]
 clap = ["foyer-storage/clap"]
 serde = ["foyer-common/serde", "foyer-storage/serde"]
 nightly = ["foyer-storage/nightly", "foyer-memory/nightly"]
@@ -38,8 +37,6 @@ strict_assertions = [
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
 ]
-runtime-tokio = ["tokio/runtime-tokio"]
-runtime-madsim-tokio = ["tokio/runtime-madsim-tokio"]
 
 [dependencies]
 anyhow = { workspace = true }

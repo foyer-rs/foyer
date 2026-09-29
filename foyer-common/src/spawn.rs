@@ -42,9 +42,6 @@ impl Drop for BackgroundShutdownRuntime {
         // Safety: The runtime is only dropped once here.
         let runtime = unsafe { ManuallyDrop::take(&mut self.0) };
 
-        #[cfg(madsim)]
-        drop(runtime);
-        #[cfg(not(madsim))]
         runtime.shutdown_background();
     }
 }
