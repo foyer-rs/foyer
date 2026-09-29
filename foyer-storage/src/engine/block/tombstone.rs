@@ -313,18 +313,30 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_partition_pages_no_u32_truncation() {
-        for tib in 1..=10usize {
-            let capacity = tib * 1024 * 1024 * 1024 * 1024;
-            let partition = capacity / 256;
+    #[cfg(target_pointer_width = "64")]
+    #[test_log::test(tokio::test)]
+    async fn test_page_buffer_locate_large_partitions() {
+        use crate::io::{device::noop::NoopDeviceBuilder, engine::noop::NoopIoEngine};
 
-            assert_eq!(partition as u32, 0, "precondition: {tib} TiB partition truncates to 0");
+        let gib = 1024usize * 1024 * 1024;
+        // Mock devices exercise large partition sizes without allocating their backing storage.
+        for size in [4 * gib - PAGE, 4 * gib, 4 * gib + PAGE, 6 * gib, 8 * gib] {
+            let device = NoopDeviceBuilder::new(size + 2 * PAGE).build().unwrap();
+            let partitions = vec![
+                device.create_partition(size).unwrap(),
+                device.create_partition(2 * PAGE).unwrap(),
+            ];
+            let buffer = PageBuffer::open(Arc::new(NoopIoEngine), partitions, 0).await.unwrap();
+            let pages = (size / PAGE) as u32;
 
-            let buggy = partition as u32 / PAGE as u32;
-            let fixed = (partition / PAGE) as u32;
-            assert_eq!(buggy, 0, "{tib} TiB: old code truncated to 0 pages");
-            assert!(fixed > 0, "{tib} TiB partition must have a non-zero page count");
+            assert_eq!(buffer.locate(0), (0, 0), "partition size: {size}");
+            assert_eq!(
+                buffer.locate(pages - 1),
+                (0, (size - PAGE) as u64),
+                "partition size: {size}"
+            );
+            assert_eq!(buffer.locate(pages), (1, 0), "partition size: {size}");
+            assert_eq!(buffer.locate(pages + 1), (1, PAGE as u64), "partition size: {size}");
         }
     }
 }
