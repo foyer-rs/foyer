@@ -1,28 +1,32 @@
 # OpenDAL secondary cache (draft)
 
-`foyer-opendal` is an unpublished experimental `Engine` over a caller-supplied
-OpenDAL `Operator`. Foyer keeps memory lookup and request coalescing. The engine
-owns pending writes, a process-local FIFO index, and I/O statistics. It builds
-no block device or POSIX I/O engine. Statistics count successful object
-reads/writes and encoded bytes; deletes, failed calls, and backend-internal
-retries are excluded. They do not measure process RSS or physical backend usage.
+Enable `foyer`'s `opendal` feature and construct `foyer::OpenDalEngineConfig`
+over a caller-supplied OpenDAL `Operator`. The unpublished `foyer-opendal`
+crate implements that engine. Foyer keeps memory lookup and request coalescing.
+The engine owns pending writes, a process-local FIFO index, and I/O statistics.
+It builds no block device or POSIX I/O engine. Statistics count successful
+object reads/writes and encoded bytes; deletes, failed calls, and
+backend-internal retries are excluded. They do not measure process RSS or
+physical backend usage.
 
-Run the filesystem example:
+Run the filesystem example (the `opendal` example feature enables `foyer/opendal`):
 
 ```sh
 cargo run -p examples --example opendal --features opendal
 ```
 
-The example fetches an immutable range, waits for the background write, clears
-memory, and reads the value from the OpenDAL cache. The caller configures the
-operator; Fs and Redis are the intended first-version backends.
+The example imports `foyer::{HybridCacheBuilder, OpenDalEngineConfig}`, fetches
+an immutable range, waits for the background write, clears memory, and reads
+the value from the OpenDAL cache. The caller configures the operator; Fs and
+Redis are the intended first-version backends.
 
 ## Usage contract
 
 - Keys are `String`; values are `Vec<u8>`. A key always identifies the same
   bytes. Include source identity, object version, and range; source reads must
   request that exact version. Updates use new keys.
-- Construct with `OpenDalEngineConfig::new(op, namespace, capacity, queue_limit)`.
+- Construct with `foyer::OpenDalEngineConfig::new(op, namespace, capacity, queue_limit)`.
+  `P` is inferred from the hybrid-cache builder; no turbofish is required.
   `with_max_object_size(bytes)` is optional. `capacity` and `queue_limit` must be
   nonzero. `max_object_size` defaults to `capacity` and must be nonzero and
   `<= capacity`.
