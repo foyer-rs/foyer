@@ -14,7 +14,6 @@
 
 //! A disk cache engine that serves as the disk cache backend of `foyer`.
 
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(feature = "nightly", feature(write_all_vectored))]
 
 mod compress;
