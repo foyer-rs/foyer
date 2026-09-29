@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "opendal")]
+#[cfg_attr(docsrs, doc(cfg(feature = "opendal")))]
+pub use foyer_opendal::OpenDalEngineConfig;
+
 #[cfg(feature = "tracing")]
 pub use crate::common::tracing::TracingOptions;
 #[cfg(target_os = "linux")]
@@ -44,6 +48,3 @@ pub use crate::{
         StorageFilterCondition, StorageFilterResult, Store, StoreBuilder, Throttle,
     },
 };
-#[cfg(feature = "opendal")]
-#[cfg_attr(docsrs, doc(cfg(feature = "opendal")))]
-pub use foyer_opendal::OpenDalEngineConfig;
