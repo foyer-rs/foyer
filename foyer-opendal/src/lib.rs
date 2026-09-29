@@ -184,11 +184,7 @@ impl<P> State<P> {
             let Some((sequence, hash)) = self.order.pop_first() else {
                 break;
             };
-            if self
-                .objects
-                .get(&hash)
-                .is_none_or(|object| object.sequence != sequence)
-            {
+            if self.objects.get(&hash).is_none_or(|object| object.sequence != sequence) {
                 continue;
             }
             if let Some(object) = self.take_object(hash) {
