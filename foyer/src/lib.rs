@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![doc = include_str!(concat!(env!("OUT_DIR"), "/foyer-docs.md"))]
-#![cfg_attr(feature = "nightly", feature(allocator_api))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use foyer_common as common;
