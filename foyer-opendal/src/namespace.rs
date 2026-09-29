@@ -17,7 +17,7 @@
 //! Object paths are `{namespace}/...` under the caller-supplied operator root.
 //! This check only rejects prefixes that could leave that relative tree. Actual
 //! exclusivity is the caller's fresh-namespace contract: one owner, unused
-//! prefix, [`foyer::RecoverMode::None`]. There is no distributed lock, existence
+//! prefix, [`foyer_storage::RecoverMode::None`]. There is no distributed lock, existence
 //! probe, restart recovery, shared writer, or automatic orphan scan.
 //!
 //! Residual objects remain after a normal close, skipped cleanup, crash,
@@ -25,7 +25,7 @@
 //! A restart must use a new unused prefix and starts with an empty in-process
 //! index.
 
-use foyer::{Error, ErrorKind, Result};
+use foyer_common::error::{Error, ErrorKind, Result};
 
 /// Accept a nonempty relative prefix that cannot traverse above itself.
 pub(crate) fn validate(namespace: &str) -> Result<()> {
@@ -52,7 +52,7 @@ fn is_relative_exclusive_prefix(namespace: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use foyer::ErrorKind;
+    use foyer_common::error::ErrorKind;
 
     use super::validate;
 

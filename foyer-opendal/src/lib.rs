@@ -44,8 +44,9 @@ mod codec;
 mod namespace;
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     fmt::Debug,
+    marker::PhantomData,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -53,10 +54,9 @@ use std::{
     time::Duration,
 };
 
-use foyer::HybridCacheProperties;
 use foyer_common::{
     error::{Error, ErrorKind, Result},
-    properties::Age,
+    properties::{Age, Properties},
 };
 use foyer_storage::{
     Engine, EngineBuildContext, EngineConfig, Load, PieceRef, Populated, RecoverMode, Statistics, StorageFilterResult,
@@ -67,8 +67,8 @@ use opendal_core::Operator;
 use parking_lot::Mutex;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 
-type Piece = PieceRef<String, Vec<u8>, HybridCacheProperties>;
-type CacheEngine = dyn Engine<String, Vec<u8>, HybridCacheProperties>;
+type Piece<P> = PieceRef<String, Vec<u8>, P>;
+type CacheEngine<P> = dyn Engine<String, Vec<u8>, P>;
 
 /// Minimum byte charge so empty keys cannot create unbounded metadata or work.
 const MIN_CHARGE: usize = 64;
@@ -110,7 +110,7 @@ fn object_path(namespace: &str, hash: u64, sequence: u64) -> String {
     format!("{namespace}/{hash:016x}/{sequence:016x}")
 }
 
-fn record_failure(state: &mut State, error: impl ToString) {
+fn record_failure<P>(state: &mut State<P>, error: impl ToString) {
     if state.failures.len() >= MAX_ERROR_RECORDS {
         state.failures.pop_front();
         state.dropped_failures = state.dropped_failures.saturating_add(1);
@@ -118,7 +118,7 @@ fn record_failure(state: &mut State, error: impl ToString) {
     state.failures.push_back(error.to_string());
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Object {
     key: String,
     path: String,
@@ -127,29 +127,45 @@ struct Object {
 }
 
 #[derive(Debug)]
-struct Pending {
+struct Pending<P> {
     sequence: u64,
     // One keeper registration per logical write, not one per waiting caller.
-    piece: Piece,
+    piece: Piece<P>,
 }
 
-#[derive(Debug, Default)]
-struct State {
+#[derive(Debug)]
+struct State<P> {
     next: u64,
     // Also serializes mutation publication with command insertion.
-    pending: HashMap<u64, Pending>,
-    objects: HashMap<u64, Object>,
-    fifo: VecDeque<(u64, u64)>,
+    pending: HashMap<u64, Pending<P>>,
+    objects: HashMap<u64, Arc<Object>>,
+    /// Sequence -> hash. Oldest sequence is the FIFO victim.
+    order: BTreeMap<u64, u64>,
     indexed_bytes: usize,
     failures: VecDeque<String>,
     dropped_failures: usize,
     closed: bool,
 }
 
-impl State {
-    fn take_object(&mut self, hash: u64) -> Option<Object> {
-        self.fifo.retain(|(key, _)| *key != hash);
+impl<P> Default for State<P> {
+    fn default() -> Self {
+        Self {
+            next: 0,
+            pending: HashMap::new(),
+            objects: HashMap::new(),
+            order: BTreeMap::new(),
+            indexed_bytes: 0,
+            failures: VecDeque::new(),
+            dropped_failures: 0,
+            closed: false,
+        }
+    }
+}
+
+impl<P> State<P> {
+    fn take_object(&mut self, hash: u64) -> Option<Arc<Object>> {
         let object = self.objects.remove(&hash)?;
+        self.order.remove(&object.sequence);
         self.indexed_bytes = self.indexed_bytes.saturating_sub(object.size);
         Some(object)
     }
@@ -165,16 +181,18 @@ impl State {
         while self.indexed_bytes.saturating_add(extra_bytes) > capacity
             || self.objects.len().saturating_add(extra_objects) > max_entries
         {
-            let Some((victim, version)) = self.fifo.pop_front() else {
+            let Some((sequence, hash)) = self.order.pop_first() else {
                 break;
             };
-            if self
+            if !self
                 .objects
-                .get(&victim)
-                .is_some_and(|object| object.sequence == version)
-                && let Some(object) = self.take_object(victim)
+                .get(&hash)
+                .is_some_and(|object| object.sequence == sequence)
             {
-                removed.push(object.path);
+                continue;
+            }
+            if let Some(object) = self.take_object(hash) {
+                removed.push(object.path.clone());
             }
         }
         removed
@@ -182,7 +200,7 @@ impl State {
 }
 
 #[derive(Debug)]
-struct Shared {
+struct Shared<P> {
     op: Operator,
     namespace: String,
     capacity: usize,
@@ -190,13 +208,16 @@ struct Shared {
     max_object_size: usize,
     max_entries: usize,
     timeout: Duration,
-    state: Mutex<State>,
+    state: Mutex<State<P>>,
     queued_bytes: AtomicUsize,
     reads: Semaphore,
     statistics: Arc<Statistics>,
 }
 
-impl Shared {
+impl<P> Shared<P>
+where
+    P: Properties,
+{
     fn fail(&self, error: impl ToString) {
         record_failure(&mut self.state.lock(), error);
     }
@@ -277,7 +298,7 @@ impl Shared {
         }
     }
 
-    fn forget_object(&self, hash: u64, sequence: u64) -> Option<Object> {
+    fn forget_object(&self, hash: u64, sequence: u64) -> Option<Arc<Object>> {
         let mut state = self.state.lock();
         if state
             .objects
@@ -360,21 +381,21 @@ impl Shared {
         }
         let mut removed = Vec::new();
         if let Some(old) = state.take_object(hash) {
-            removed.push(old.path);
+            removed.push(old.path.clone());
         }
         removed.extend(state.evict_until(size, 1, self.capacity, self.max_entries));
         if state.indexed_bytes.saturating_add(size) <= self.capacity && state.objects.len() < self.max_entries {
             state.objects.insert(
                 hash,
-                Object {
+                Arc::new(Object {
                     key,
                     path,
                     size,
                     sequence,
-                },
+                }),
             );
             state.indexed_bytes = state.indexed_bytes.saturating_add(size);
-            state.fifo.push_back((hash, sequence));
+            state.order.insert(sequence, hash);
         } else {
             removed.push(path);
         }
@@ -390,8 +411,8 @@ enum Command {
 }
 
 #[derive(Debug)]
-struct OpenDalEngine {
-    shared: Arc<Shared>,
+struct OpenDalEngine<P> {
+    shared: Arc<Shared<P>>,
     tx: mpsc::Sender<Command>,
 }
 
@@ -399,16 +420,20 @@ struct OpenDalEngine {
 ///
 /// Only immutable `String` keys and `Vec<u8>` values are supported. The caller
 /// must supply an unused namespace exclusively owned by this cache instance.
+///
+/// `P` is inferred from the hybrid-cache builder. [`OpenDalEngineConfig::new`]
+/// does not require a turbofish when passed to `with_engine_config`.
 #[derive(Debug)]
-pub struct OpenDalEngineConfig {
+pub struct OpenDalEngineConfig<P> {
     op: Operator,
     namespace: String,
     capacity: usize,
     queue_limit: usize,
     max_object_size: Option<usize>,
+    _marker: PhantomData<fn() -> P>,
 }
 
-impl OpenDalEngineConfig {
+impl<P> OpenDalEngineConfig<P> {
     /// Create a cache configuration using a caller-supplied OpenDAL operator.
     ///
     /// `capacity` limits indexed encoded bytes and defaults as the maximum
@@ -436,6 +461,7 @@ impl OpenDalEngineConfig {
             capacity,
             queue_limit,
             max_object_size: None,
+            _marker: PhantomData,
         }
     }
 
@@ -452,14 +478,20 @@ impl OpenDalEngineConfig {
     }
 }
 
-impl From<OpenDalEngineConfig> for Box<dyn EngineConfig<String, Vec<u8>, HybridCacheProperties>> {
-    fn from(config: OpenDalEngineConfig) -> Self {
+impl<P> From<OpenDalEngineConfig<P>> for Box<dyn EngineConfig<String, Vec<u8>, P>>
+where
+    P: Properties,
+{
+    fn from(config: OpenDalEngineConfig<P>) -> Self {
         Box::new(config)
     }
 }
 
-impl EngineConfig<String, Vec<u8>, HybridCacheProperties> for OpenDalEngineConfig {
-    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<CacheEngine>>> {
+impl<P> EngineConfig<String, Vec<u8>, P> for OpenDalEngineConfig<P>
+where
+    P: Properties,
+{
+    fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<CacheEngine<P>>>> {
         Box::pin(async move {
             if !matches!(ctx.recover_mode, RecoverMode::None) {
                 return Err(Error::new(
@@ -535,12 +567,15 @@ impl EngineConfig<String, Vec<u8>, HybridCacheProperties> for OpenDalEngineConfi
                     }
                 }
             });
-            Ok(engine as Arc<CacheEngine>)
+            Ok(engine as Arc<CacheEngine<P>>)
         })
     }
 }
 
-impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
+impl<P> Engine<String, Vec<u8>, P> for OpenDalEngine<P>
+where
+    P: Properties,
+{
     fn statistics(&self) -> &Arc<Statistics> {
         &self.shared.statistics
     }
@@ -555,7 +590,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
         }
     }
 
-    fn enqueue(&self, piece: Piece, _estimated_size: usize) {
+    fn enqueue(&self, piece: Piece<P>, _estimated_size: usize) {
         let hash = piece.hash();
         let Some(encoded) = encoded_len(piece.key(), piece.value()) else {
             return;
@@ -609,7 +644,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 state.next += 1;
                 let sequence = state.next;
                 if let Some(old) = state.take_object(hash) {
-                    deletes.push(old.path);
+                    deletes.push(old.path.clone());
                 }
                 state.pending.insert(hash, Pending { piece, sequence });
                 if self
@@ -630,7 +665,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
         self.shared.request_deletes(&self.tx, deletes);
     }
 
-    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<String, Vec<u8>, HybridCacheProperties>>> {
+    fn load(&self, hash: u64) -> BoxFuture<'static, Result<Load<String, Vec<u8>, P>>> {
         let shared = self.shared.clone();
         let tx = self.tx.clone();
         Box::pin(async move {
@@ -656,7 +691,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
             drop(permit);
             if bytes.len() > shared.max_object_size {
                 if let Some(object) = shared.forget_object(hash, object.sequence) {
-                    shared.request_delete(&tx, object.path);
+                    shared.request_delete(&tx, object.path.clone());
                 }
                 return Err(Error::new(
                     ErrorKind::OutOfRange,
@@ -668,7 +703,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 Ok(value) => value,
                 Err(error) => {
                     if let Some(object) = shared.forget_object(hash, object.sequence) {
-                        shared.request_delete(&tx, object.path);
+                        shared.request_delete(&tx, object.path.clone());
                     }
                     return Err(error);
                 }
@@ -683,7 +718,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 return Ok(Load::Miss);
             }
             Ok(Load::Entry {
-                key: object.key,
+                key: object.key.clone(),
                 value,
                 populated: Populated { age: Age::Young },
             })
@@ -697,7 +732,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                 return;
             }
             state.pending.remove(&hash);
-            state.take_object(hash).map(|object| object.path)
+            state.take_object(hash).map(|object| object.path.clone())
         };
         if let Some(path) = path {
             self.shared.request_delete(&self.tx, path);
@@ -718,9 +753,13 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for OpenDalEngine {
                     return Err(Error::new(ErrorKind::Closed, "opendal cache is closed"));
                 }
                 state.pending.clear();
-                state.fifo.clear();
+                state.order.clear();
                 state.indexed_bytes = 0;
-                state.objects.drain().map(|(_, object)| object.path).collect::<Vec<_>>()
+                state
+                    .objects
+                    .drain()
+                    .map(|(_, object)| object.path.clone())
+                    .collect::<Vec<_>>()
             };
             if !paths.is_empty() {
                 let _ = tx.send(Command::Delete(paths)).await;

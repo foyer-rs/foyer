@@ -38,9 +38,10 @@ use opendal_core::{EntryMode, Operator};
 
 use crate::{OpenDalEngineConfig, codec, object_path};
 
+type Props = HybridCacheProperties;
 type Cache = HybridCache<String, Vec<u8>>;
-type Backend = dyn Engine<String, Vec<u8>, HybridCacheProperties>;
-type Piece = PieceRef<String, Vec<u8>, HybridCacheProperties>;
+type Backend = dyn Engine<String, Vec<u8>, Props>;
+type Piece = PieceRef<String, Vec<u8>, Props>;
 
 /// One 2s I/O plus drain/scheduling margin for a single admitted command.
 const ONE_COMMAND: Duration = Duration::from_secs(5);
@@ -128,13 +129,18 @@ fn fixture(kind: Kind, name: &str) -> Result<Fixture> {
     }
 }
 
-fn engine_config(kind: Kind, name: &str, capacity: usize, queue: usize) -> Result<(OpenDalEngineConfig, Fixture)> {
+fn engine_config(
+    kind: Kind,
+    name: &str,
+    capacity: usize,
+    queue: usize,
+) -> Result<(OpenDalEngineConfig<Props>, Fixture)> {
     let fx = fixture(kind, name)?;
     let config = OpenDalEngineConfig::new(fx.op.clone(), fx.namespace.clone(), capacity, queue);
     Ok((config, fx))
 }
 
-async fn build(config: impl Into<Box<dyn EngineConfig<String, Vec<u8>, HybridCacheProperties>>>) -> Result<Cache> {
+async fn build(config: impl Into<Box<dyn EngineConfig<String, Vec<u8>, Props>>>) -> Result<Cache> {
     let calls = Arc::new(AtomicU64::new(0));
     let cache = HybridCacheBuilder::new()
         .with_policy(HybridCachePolicy::WriteOnInsertion)
@@ -191,17 +197,17 @@ struct Forwarder {
 
 #[derive(Debug)]
 struct HeldConfig {
-    config: OpenDalEngineConfig,
+    config: OpenDalEngineConfig<Props>,
     forwarder: Arc<Mutex<Forwarder>>,
 }
 
-impl From<HeldConfig> for Box<dyn EngineConfig<String, Vec<u8>, HybridCacheProperties>> {
+impl From<HeldConfig> for Box<dyn EngineConfig<String, Vec<u8>, Props>> {
     fn from(value: HeldConfig) -> Self {
         Box::new(value)
     }
 }
 
-impl EngineConfig<String, Vec<u8>, HybridCacheProperties> for HeldConfig {
+impl EngineConfig<String, Vec<u8>, Props> for HeldConfig {
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, foyer::Result<Arc<Backend>>> {
         Box::pin(async move {
             let engine = Box::new(self.config).build(ctx).await?;
@@ -220,7 +226,7 @@ struct HeldEngine {
     forwarder: Arc<Mutex<Forwarder>>,
 }
 
-impl Engine<String, Vec<u8>, HybridCacheProperties> for HeldEngine {
+impl Engine<String, Vec<u8>, Props> for HeldEngine {
     fn device(&self) -> Option<&Arc<dyn Device>> {
         self.engine.device()
     }
@@ -237,7 +243,7 @@ impl Engine<String, Vec<u8>, HybridCacheProperties> for HeldEngine {
         self.forwarder.lock().unwrap().entries.push((p, s));
     }
 
-    fn load(&self, h: u64) -> BoxFuture<'static, foyer::Result<Load<String, Vec<u8>, HybridCacheProperties>>> {
+    fn load(&self, h: u64) -> BoxFuture<'static, foyer::Result<Load<String, Vec<u8>, Props>>> {
         self.engine.load(h)
     }
 
@@ -516,6 +522,141 @@ async fn fifo_eviction_allows_young_entry_refill() -> Result<()> {
         cache.memory().clear();
         assert_eq!(cache.get(&"a/v1".to_string()).await?.unwrap().value(), &vec![1; 4096]);
         assert!(cache.get(&"b/v1".to_string()).await?.is_none());
+        cache.close().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn fifo_keeps_index_bounded_after_delete_replace_and_missing_remove() -> Result<()> {
+    const PAYLOAD: usize = 4096;
+    let encoded = codec::HEADER_LEN + "a/v1".len() + PAYLOAD;
+    let cap2 = encoded * 2 + encoded / 4;
+    let cap3 = encoded * 3 + encoded / 4;
+    for kind in kinds() {
+        let _guard = serialize_kind(kind);
+
+        let (config, _fx) = engine_config(kind, "fifo-missing", cap2, 1 << 20)?;
+        let cache = build(config).await?;
+        drop(cache.insert("a/v1".into(), vec![1; PAYLOAD]));
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        drop(cache.insert("b/v1".into(), vec![2; PAYLOAD]));
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        cache.remove(&"missing/v1".to_string());
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        cache.memory().clear();
+        assert_eq!(
+            cache.get(&"a/v1".to_string()).await?.unwrap().value(),
+            &vec![1; PAYLOAD]
+        );
+        assert_eq!(
+            cache.get(&"b/v1".to_string()).await?.unwrap().value(),
+            &vec![2; PAYLOAD]
+        );
+
+        // Reinsert of a deleted hash is youngest. The next admission must evict live
+        // oldest `b`, not the replacement `a`.
+        cache.remove(&"a/v1".to_string());
+        bounded(ONE_COMMAND, async {
+            drop(cache.insert("a/v1".into(), vec![9; PAYLOAD]));
+            cache.storage().wait().await;
+        })
+        .await?;
+        bounded(ONE_COMMAND, async {
+            drop(cache.insert("c/v1".into(), vec![3; PAYLOAD]));
+            cache.storage().wait().await;
+        })
+        .await?;
+        cache.memory().clear();
+        assert!(cache.get(&"b/v1".to_string()).await?.is_none());
+        assert_eq!(
+            cache.get(&"a/v1".to_string()).await?.unwrap().value(),
+            &vec![9; PAYLOAD]
+        );
+        assert_eq!(
+            cache.get(&"c/v1".to_string()).await?.unwrap().value(),
+            &vec![3; PAYLOAD]
+        );
+        cache.close().await?;
+
+        let (config, _fx) = engine_config(kind, "fifo-middle", cap3, 1 << 20)?;
+        let cache = build(config).await?;
+        drop(cache.insert("a/v1".into(), vec![1; PAYLOAD]));
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        drop(cache.insert("b/v1".into(), vec![2; PAYLOAD]));
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        drop(cache.insert("c/v1".into(), vec![3; PAYLOAD]));
+        bounded(ONE_COMMAND, cache.storage().wait()).await?;
+        cache.remove(&"b/v1".to_string());
+        bounded(ONE_COMMAND, async {
+            drop(cache.insert("d/v1".into(), vec![4; PAYLOAD]));
+            cache.storage().wait().await;
+        })
+        .await?;
+        bounded(ONE_COMMAND, async {
+            drop(cache.insert("e/v1".into(), vec![5; PAYLOAD]));
+            cache.storage().wait().await;
+        })
+        .await?;
+        cache.memory().clear();
+        assert!(cache.get(&"a/v1".to_string()).await?.is_none());
+        assert!(cache.get(&"b/v1".to_string()).await?.is_none());
+        assert_eq!(
+            cache.get(&"c/v1".to_string()).await?.unwrap().value(),
+            &vec![3; PAYLOAD]
+        );
+        assert_eq!(
+            cache.get(&"d/v1".to_string()).await?.unwrap().value(),
+            &vec![4; PAYLOAD]
+        );
+        assert_eq!(
+            cache.get(&"e/v1".to_string()).await?.unwrap().value(),
+            &vec![5; PAYLOAD]
+        );
+        cache.close().await?;
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn overlapping_loads_keep_key_identity_while_siblings_churn() -> Result<()> {
+    for kind in kinds() {
+        let _guard = serialize_kind(kind);
+        let (config, _fx) = engine_config(kind, "held-reads", 1 << 20, 1 << 20)?;
+        let cache = build(config).await?;
+        let held = "held/v1".to_string();
+        drop(cache.insert(held.clone(), vec![7; 4096]));
+        drop(cache.insert("sib-a/v1".into(), vec![1; 4096]));
+        drop(cache.insert("sib-b/v1".into(), vec![2; 4096]));
+        cache.storage().wait().await;
+        cache.memory().clear();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(8));
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let (cache, barrier, held) = (cache.clone(), barrier.clone(), held.clone());
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                let entry = cache
+                    .get(&held)
+                    .await?
+                    .ok_or_else(|| anyhow::anyhow!("held object must remain readable"))?;
+                anyhow::Ok((entry.key().clone(), entry.value().clone()))
+            }));
+        }
+        cache.remove(&"sib-a/v1".to_string());
+        drop(cache.insert("sib-c/v1".into(), vec![3; 4096]));
+        bounded(ONE_COMMAND + ONE_COMMAND, cache.storage().wait()).await?;
+        for task in tasks {
+            let (key, value) = task.await??;
+            assert_eq!(key, held);
+            assert_eq!(value, vec![7; 4096]);
+        }
+        cache.memory().clear();
+        let entry = cache.get(&held).await?.expect("held object must remain readable");
+        assert_eq!(entry.key(), &held);
+        assert_eq!(entry.value(), &vec![7; 4096]);
+        assert!(cache.get(&"sib-a/v1".to_string()).await?.is_none());
         cache.close().await?;
     }
     Ok(())

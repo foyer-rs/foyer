@@ -44,3 +44,6 @@ pub use crate::{
         StorageFilterCondition, StorageFilterResult, Store, StoreBuilder, Throttle,
     },
 };
+#[cfg(feature = "opendal")]
+#[cfg_attr(docsrs, doc(cfg(feature = "opendal")))]
+pub use foyer_opendal::OpenDalEngineConfig;

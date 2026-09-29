@@ -32,7 +32,7 @@
 //! compatible with the prototype `FOYODL01` envelope and is not a recovery or
 //! generic codec format.
 
-use foyer::{Error, ErrorKind, Result};
+use foyer_common::error::{Error, ErrorKind, Result};
 
 /// Recognizable first-version object magic. Distinct from experimental `FOYODL01`.
 pub(crate) const MAGIC: [u8; 8] = *b"FODL0001";
@@ -204,11 +204,11 @@ pub(crate) fn claimed_huge_value(key: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use foyer::ErrorKind;
+    use foyer_common::error::{Error, ErrorKind};
 
     use super::*;
 
-    fn assert_reject(err: foyer::Error) {
+    fn assert_reject(err: Error) {
         assert!(
             matches!(
                 err.kind(),
