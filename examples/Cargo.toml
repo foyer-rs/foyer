@@ -34,7 +34,7 @@ anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
-foyer = { workspace = true, features = ["runtime-tokio"] }
+foyer = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, default-features = false, features = [
   "server",

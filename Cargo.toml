@@ -7,7 +7,6 @@ members = [
   "foyer-common",
   "foyer-memory",
   "foyer-storage",
-  "foyer-tokio",
   "xtask",
 ]
 
@@ -78,19 +77,13 @@ pin-project = "1"
 prometheus = "0.14"
 rand = { version = "0.10.0", default-features = false }
 rand_distr = { version = "0.6.0" }
-# Enable all features by default to make it possible to opt-out madsim dependency. 
-# See why we need this at https://github.com/rust-lang/cargo/issues/10801
-runtime-madsim-tokio = { package = "madsim-tokio", version = "0.2", features = [
-  "full",
-] }
-runtime-tokio = { package = "tokio", version = "1", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"
 serde_json = "1"
 tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
-tokio = { package = "foyer-tokio", version = "0.22.6", path = "foyer-tokio", default-features = false }
+tokio = { version = "1", default-features = false }
 # tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
 # Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
 tonic = { version = "0.14.6", default-features = false }
@@ -101,7 +94,6 @@ zstd = "0.13"
 
 [workspace.lints.rust]
 missing_docs = "warn"
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(madsim)'] }
 
 [workspace.lints.clippy]
 allow_attributes = "warn"
