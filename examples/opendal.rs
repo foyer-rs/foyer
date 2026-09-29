@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::{HybridCache, HybridCacheBuilder, HybridCachePolicy, RecoverMode};
-use foyer_opendal::OpenDalEngineConfig;
+use foyer::{HybridCache, HybridCacheBuilder, HybridCachePolicy, OpenDalEngineConfig, RecoverMode};
 use opendal_core::Operator;
 
 #[tokio::main]
