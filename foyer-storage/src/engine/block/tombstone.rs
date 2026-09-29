@@ -232,7 +232,7 @@ impl PageBuffer {
         let mut partition = 0;
 
         loop {
-            let partition_pages = self.partitions[partition].size() as u32 / PAGE as u32;
+            let partition_pages = (self.partitions[partition].size() / PAGE) as u32;
             if page < partition_pages {
                 break (partition, PAGE as u64 * page as u64);
             }
@@ -310,6 +310,33 @@ mod tests {
             assert_eq!(inner.slot, (3 * 1024 + 42 + 1) % (TombstoneLog::SLOTS_PER_PAGE * 4));
             let (page, _) = log.slot_addr(inner.slot);
             assert_eq!(inner.buffer.page, page);
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test_log::test(tokio::test)]
+    async fn test_page_buffer_locate_large_partitions() {
+        use crate::io::{device::noop::NoopDeviceBuilder, engine::noop::NoopIoEngine};
+
+        let gib = 1024usize * 1024 * 1024;
+        // Mock devices exercise large partition sizes without allocating their backing storage.
+        for size in [4 * gib - PAGE, 4 * gib, 4 * gib + PAGE, 6 * gib, 8 * gib] {
+            let device = NoopDeviceBuilder::new(size + 2 * PAGE).build().unwrap();
+            let partitions = vec![
+                device.create_partition(size).unwrap(),
+                device.create_partition(2 * PAGE).unwrap(),
+            ];
+            let buffer = PageBuffer::open(Arc::new(NoopIoEngine), partitions, 0).await.unwrap();
+            let pages = (size / PAGE) as u32;
+
+            assert_eq!(buffer.locate(0), (0, 0), "partition size: {size}");
+            assert_eq!(
+                buffer.locate(pages - 1),
+                (0, (size - PAGE) as u64),
+                "partition size: {size}"
+            );
+            assert_eq!(buffer.locate(pages), (1, 0), "partition size: {size}");
+            assert_eq!(buffer.locate(pages + 1), (1, PAGE as u64), "partition size: {size}");
         }
     }
 }
