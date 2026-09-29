@@ -10,8 +10,9 @@ publish = false
 
 [features]
 default = ["runtime-tokio"]
-runtime-tokio = ["tokio/runtime-tokio"]
-runtime-madsim-tokio = ["tokio/runtime-madsim-tokio"]
+# Tests compile the foyer facade; keep its runtime in lockstep with this crate.
+runtime-tokio = ["tokio/runtime-tokio", "foyer/runtime-tokio"]
+runtime-madsim-tokio = ["tokio/runtime-madsim-tokio", "foyer/runtime-madsim-tokio"]
 test-redis = ["dep:opendal-service-redis"]
 
 [dependencies]
@@ -25,7 +26,7 @@ tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }
-foyer = { workspace = true, features = ["runtime-tokio"] }
+foyer = { workspace = true }
 opendal-service-fs = { version = "=0.59.1" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
