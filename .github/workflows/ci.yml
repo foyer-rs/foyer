@@ -263,6 +263,50 @@ jobs:
         with:
           verbose: true
 
+  opendal-redis:
+    name: foyer-opendal redis
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:6
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Cache Cargo home
+        uses: actions/cache@v4
+        id: cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-opendal-redis
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: taiki-e/install-action@nextest
+      - name: Run foyer-opendal Redis tests
+        env:
+          RUST_BACKTRACE: 1
+          CI: true
+          FOYER_OPENDAL_REDIS_URL: redis://127.0.0.1:6379
+        run: |
+          cargo clippy -p foyer-opendal --all-targets --features test-redis -- -D warnings
+          cargo nextest run -p foyer-opendal --features test-redis --test-threads=1
+
   foyer-bench-fuzzy-test:
     name: foyer bench fuzzy test with codecov
     strategy:
