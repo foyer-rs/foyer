@@ -207,18 +207,21 @@ where
                 let (tx, rx) = oneshot::channel();
                 let id = self.next_id;
                 self.next_id += 1;
+                // Leader and table share this Arc: `take`/`fetch_or_take` set it through the
+                // table entry, and the leader's `RawFetch::poll` reads it through its own
+                // clone, so cancellation is actually observed instead of silently no-op'd.
+                let close = Arc::new(AtomicBool::new(false));
                 let entry = InflightEntry {
                     hash,
                     key: key.to_owned(),
                     inflight: Inflight {
                         id,
-                        close: Arc::new(AtomicBool::new(false)),
+                        close: close.clone(),
                         notifiers: vec![tx],
                         f: None,
                     },
                 };
                 v.insert(entry);
-                let close = Arc::new(AtomicBool::new(false));
                 Enqueue::Lead {
                     id,
                     close,
@@ -304,4 +307,36 @@ where
 {
     Fetch(RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>),
     Notifiers(Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>),
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer_common::hasher::ModHasher;
+
+    use super::*;
+    use crate::{TestProperties, eviction::fifo::Fifo, indexer::hash_table::HashTableIndexer};
+
+    type TestEviction = Fifo<u64, u64, TestProperties>;
+    type TestManager = InflightManager<TestEviction, ModHasher, HashTableIndexer<TestEviction>>;
+
+    #[test]
+    fn test_enqueue_leader_observes_take_through_shared_close_flag() {
+        let mut manager = TestManager::new();
+        let key = 1u64;
+        let hash = 0;
+
+        let close = match manager.enqueue::<_, ()>(hash, &key, None) {
+            Enqueue::Lead { close, .. } => close,
+            Enqueue::Wait(_) => panic!("expected Lead on the first enqueue for a vacant key"),
+        };
+
+        // A concurrent `insert` racing the in-flight fetch cancels it via `take`, which flips
+        // the table's copy of the close flag. The leader must observe that through its own
+        // clone of the *same* Arc, or cancellation is silently inert.
+        manager.take(hash, &key, None);
+        assert!(
+            close.load(Ordering::Relaxed),
+            "leader's close flag must observe cancellation via take()"
+        );
+    }
 }
