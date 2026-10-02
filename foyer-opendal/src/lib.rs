@@ -106,6 +106,33 @@ fn queue_charge(encoded: usize, queue_limit: usize) -> usize {
     }
 }
 
+/// Reserve `reserved` bytes when the queued total would still be within `limit`.
+///
+/// Admission on the keeper thread races with `release_queued_bytes` on the worker.
+fn try_reserve_queued(queued: &AtomicUsize, reserved: usize, limit: usize) -> bool {
+    let mut current = queued.load(Ordering::SeqCst);
+    loop {
+        let Some(next) = current.checked_add(reserved).filter(|next| *next <= limit) else {
+            return false;
+        };
+        match queued.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return true,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn release_queued_bytes(queued: &AtomicUsize, n: usize) {
+    let mut current = queued.load(Ordering::SeqCst);
+    loop {
+        let next = current.saturating_sub(n);
+        match queued.compare_exchange_weak(current, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return,
+            Err(observed) => current = observed,
+        }
+    }
+}
+
 fn object_path(namespace: &str, hash: u64, sequence: u64) -> String {
     format!("{namespace}/{hash:016x}/{sequence:016x}")
 }
@@ -308,9 +335,7 @@ where
     }
 
     fn release_queued(&self, n: usize) {
-        let _ = self
-            .queued_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| Some(v.saturating_sub(n)));
+        release_queued_bytes(&self.queued_bytes, n);
     }
 
     fn abandon_inflight(&self) {
@@ -620,14 +645,7 @@ where
             {
                 return;
             }
-            if self
-                .shared
-                .queued_bytes
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                    n.checked_add(reserved).filter(|n| *n <= self.shared.queue_limit)
-                })
-                .is_err()
-            {
+            if !try_reserve_queued(&self.shared.queued_bytes, reserved, self.shared.queue_limit) {
                 return;
             }
             let replacing = state.pending.contains_key(&hash) || state.objects.contains_key(&hash);
@@ -825,3 +843,60 @@ where
 
 #[cfg(all(test, not(madsim)))]
 mod engine_tests;
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
+    };
+
+    use super::{release_queued_bytes, try_reserve_queued};
+
+    #[test]
+    fn queued_reservation_respects_limit_and_saturates() {
+        let queued = AtomicUsize::new(0);
+        assert!(try_reserve_queued(&queued, 60, 100));
+        assert_eq!(queued.load(Ordering::SeqCst), 60);
+        assert!(!try_reserve_queued(&queued, 41, 100));
+        assert_eq!(queued.load(Ordering::SeqCst), 60);
+        assert!(try_reserve_queued(&queued, 40, 100));
+        assert_eq!(queued.load(Ordering::SeqCst), 100);
+        assert!(!try_reserve_queued(&queued, 1, 100));
+        assert!(!try_reserve_queued(&queued, usize::MAX, usize::MAX));
+        assert_eq!(queued.load(Ordering::SeqCst), 100);
+
+        release_queued_bytes(&queued, 40);
+        assert_eq!(queued.load(Ordering::SeqCst), 60);
+        release_queued_bytes(&queued, 1_000);
+        assert_eq!(queued.load(Ordering::SeqCst), 0);
+        release_queued_bytes(&queued, 1);
+        assert_eq!(queued.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn queued_reservation_matches_releases_under_contention() {
+        let queued = AtomicUsize::new(0);
+        let held = thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for _ in 0..4 {
+                handles.push(scope.spawn(|| {
+                    let mut held = 0usize;
+                    for _ in 0..400 {
+                        if try_reserve_queued(&queued, 8, 64) {
+                            held += 8;
+                        }
+                        assert!(queued.load(Ordering::SeqCst) <= 64);
+                        if held >= 8 {
+                            release_queued_bytes(&queued, 8);
+                            held -= 8;
+                        }
+                    }
+                    held
+                }));
+            }
+            handles.into_iter().map(|handle| handle.join().unwrap()).sum::<usize>()
+        });
+        assert_eq!(queued.load(Ordering::SeqCst), held);
+    }
+}
