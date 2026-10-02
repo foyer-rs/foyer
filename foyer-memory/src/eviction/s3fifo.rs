@@ -70,20 +70,6 @@ pub struct S3FifoState {
     queue: Queue,
 }
 
-// `Atomic*::try_update` stabilized in Rust 1.95 and is still unstable on MSRV 1.91.
-// Rust 1.99 deprecates `fetch_update` as a rename of that same operation.
-#[expect(clippy::allow_attributes)]
-#[allow(deprecated)]
-#[inline]
-fn atomic_u8_fetch_update(
-    atomic: &AtomicU8,
-    set_order: Ordering,
-    fetch_order: Ordering,
-    f: impl FnMut(u8) -> Option<u8>,
-) -> std::result::Result<u8, u8> {
-    atomic.fetch_update(set_order, fetch_order, f)
-}
-
 impl S3FifoState {
     const MAX_FREQUENCY: u8 = 3;
 
@@ -95,18 +81,38 @@ impl S3FifoState {
         self.frequency.store(val, Ordering::Release)
     }
 
+    // Returns the frequency before this hit. Concurrent hits cap at MAX_FREQUENCY.
     fn inc_frequency(&self) -> u8 {
-        atomic_u8_fetch_update(&self.frequency, Ordering::Release, Ordering::Acquire, |v| {
-            Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
-        })
-        .unwrap()
+        let mut current = self.frequency.load(Ordering::Acquire);
+        loop {
+            let next = if current < Self::MAX_FREQUENCY {
+                current + 1
+            } else {
+                Self::MAX_FREQUENCY
+            };
+            match self
+                .frequency
+                .compare_exchange_weak(current, next, Ordering::Release, Ordering::Acquire)
+            {
+                Ok(previous) => return previous,
+                Err(observed) => current = observed,
+            }
+        }
     }
 
+    // Returns the frequency before this hit. Eviction drops the entry when that value is zero.
     fn dec_frequency(&self) -> u8 {
-        atomic_u8_fetch_update(&self.frequency, Ordering::Release, Ordering::Acquire, |v| {
-            Some(v.saturating_sub(1))
-        })
-        .unwrap()
+        let mut current = self.frequency.load(Ordering::Acquire);
+        loop {
+            let next = current.saturating_sub(1);
+            match self
+                .frequency
+                .compare_exchange_weak(current, next, Ordering::Release, Ordering::Acquire)
+            {
+                Ok(previous) => return previous,
+                Err(observed) => current = observed,
+            }
+        }
     }
 }
 
@@ -386,7 +392,11 @@ impl GhostQueue {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Range;
+    use std::{
+        ops::Range,
+        sync::atomic::{AtomicUsize, Ordering},
+        thread,
+    };
 
     use itertools::Itertools;
 
@@ -495,5 +505,54 @@ mod tests {
 
         s3fifo.clear();
         assert_ptr_vec_vec_eq(s3fifo.dump(), vec![vec![], vec![]]);
+    }
+
+    #[test]
+    fn frequency_saturates_under_contention() {
+        let state = S3FifoState::default();
+        for expected in 0..S3FifoState::MAX_FREQUENCY {
+            assert_eq!(state.inc_frequency(), expected);
+        }
+        assert_eq!(state.inc_frequency(), S3FifoState::MAX_FREQUENCY);
+        assert_eq!(state.frequency(), S3FifoState::MAX_FREQUENCY);
+        for expected in (1..=S3FifoState::MAX_FREQUENCY).rev() {
+            assert_eq!(state.dec_frequency(), expected);
+        }
+        assert_eq!(state.dec_frequency(), 0);
+        assert_eq!(state.frequency(), 0);
+
+        state.set_frequency(0);
+        let raised = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..64 {
+                        if state.inc_frequency() < S3FifoState::MAX_FREQUENCY {
+                            raised.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(state.frequency(), S3FifoState::MAX_FREQUENCY);
+        assert_eq!(raised.load(Ordering::Relaxed), usize::from(S3FifoState::MAX_FREQUENCY));
+
+        let positive = AtomicUsize::new(0);
+        thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..64 {
+                        if state.dec_frequency() > 0 {
+                            positive.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+        assert_eq!(state.frequency(), 0);
+        assert_eq!(
+            positive.load(Ordering::Relaxed),
+            usize::from(S3FifoState::MAX_FREQUENCY)
+        );
     }
 }
