@@ -1,9 +1,10 @@
-# OpenDAL secondary cache (draft)
+# OpenDAL secondary cache
 
 Enable `foyer`'s `opendal` feature and construct `foyer::OpenDalEngineConfig`
-over a caller-supplied OpenDAL `Operator`. The unpublished `foyer-opendal`
-crate implements that engine. Foyer keeps memory lookup and request coalescing.
-The engine owns pending writes, a process-local FIFO index, and I/O statistics.
+over a caller-supplied OpenDAL `Operator`. The in-tree `foyer-opendal` crate
+implements that engine and is not published on its own. Foyer keeps memory
+lookup and request coalescing. The engine owns pending writes, a process-local
+FIFO index, and I/O statistics.
 It builds no block device or POSIX I/O engine. Statistics count successful
 object reads/writes and encoded bytes; deletes, failed calls, and
 backend-internal retries are excluded. They do not measure process RSS or
@@ -44,12 +45,12 @@ Redis are the intended first-version backends.
 - `get`: missing object → miss; backend or decode error → error.
   `get_or_fetch` does not fall back to the source on load errors.
 - `wait()` drains commands admitted before the barrier and does not report
-  background errors. `close()` rejects new writes, drains already-admitted
-  commands, and returns a bounded set of background failures (up to 8 records,
-  plus a dropped count). A repeated `close()` returns `Ok`. Reads stay available
-  after close. Hybrid `flush_on_close` (default `true`) flushes memory into the
-  engine before that close. Worst-case close can take minutes: a finite command
-  queue times the per-command I/O and cleanup timeout.
+  background errors. `close()` rejects new writes, drains commands already
+  queued ahead of close, and returns a bounded set of background failures (up
+  to 8 records, plus a dropped count). A repeated `close()` returns `Ok`. Reads
+  stay available after close. Hybrid `flush_on_close` (default `true`) flushes
+  memory into the engine before that close. Close is bounded by the command-slot
+  limit and the 2s per-command I/O timeout.
 - Residual objects remain after a normal close, skipped cleanup, crash, timed-out
   write, or failed delete. The caller or operator reclaims them.
 
@@ -66,9 +67,10 @@ Redis are the intended first-version backends.
 | Minimum accounting charge | 64 bytes |
 | Encoded object | whole object, `<= max_object_size` |
 
-`capacity` counts indexed encoded bytes. `queue_limit` counts admitted pending
-payload bytes. Neither is an RSS or physical-storage quota. A read that cannot
-obtain a permit within the I/O timeout is throttled.
+`capacity` counts indexed encoded bytes. `queue_limit` counts admitted work in
+encoded bytes, with a 64-byte minimum charge per entry. Neither is an RSS or
+physical-storage quota. A read that cannot obtain a permit within the I/O
+timeout is throttled.
 
 ## Cache object format
 
