@@ -50,7 +50,7 @@ Redis are the intended first-version backends.
   to 8 records, plus a dropped count). A repeated `close()` returns `Ok`. Reads
   stay available after close. Hybrid `flush_on_close` (default `true`) flushes
   memory into the engine before that close. Close is bounded by the command-slot
-  limit and the 2s per-command I/O timeout.
+  limit and the per-I/O timeout.
 - Residual objects remain after a normal close, skipped cleanup, crash, timed-out
   write, or failed delete. The caller or operator reclaims them.
 
@@ -64,11 +64,12 @@ Redis are the intended first-version backends.
 | Error records | 8, plus a dropped-older count |
 | Concurrent reads | 8 |
 | Cleanup deletions per batch | at most 8; the rest are skipped |
-| Minimum accounting charge | 64 bytes |
+| Minimum accounting charge | 64 bytes when the queue budget permits |
 | Encoded object | whole object, `<= max_object_size` |
 
 `capacity` counts indexed encoded bytes. `queue_limit` counts admitted work in
-encoded bytes, with a 64-byte minimum charge per entry. Neither is an RSS or
+encoded bytes, with a 64-byte minimum charge per entry when the queue budget
+permits. Neither is an RSS or
 physical-storage quota. A read that cannot obtain a permit within the I/O
 timeout is throttled.
 
