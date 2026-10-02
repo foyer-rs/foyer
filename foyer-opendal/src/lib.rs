@@ -106,6 +106,20 @@ fn queue_charge(encoded: usize, queue_limit: usize) -> usize {
     }
 }
 
+// `Atomic*::try_update` stabilized in Rust 1.95 and is still unstable on MSRV 1.91.
+// Rust 1.99 deprecates `fetch_update` as a rename of that same operation.
+#[expect(clippy::allow_attributes)]
+#[allow(deprecated)]
+#[inline]
+fn atomic_usize_fetch_update(
+    atomic: &AtomicUsize,
+    set_order: Ordering,
+    fetch_order: Ordering,
+    f: impl FnMut(usize) -> Option<usize>,
+) -> std::result::Result<usize, usize> {
+    atomic.fetch_update(set_order, fetch_order, f)
+}
+
 fn object_path(namespace: &str, hash: u64, sequence: u64) -> String {
     format!("{namespace}/{hash:016x}/{sequence:016x}")
 }
@@ -308,9 +322,9 @@ where
     }
 
     fn release_queued(&self, n: usize) {
-        let _ = self
-            .queued_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| Some(v.saturating_sub(n)));
+        let _ = atomic_usize_fetch_update(&self.queued_bytes, Ordering::SeqCst, Ordering::SeqCst, |v| {
+            Some(v.saturating_sub(n))
+        });
     }
 
     fn abandon_inflight(&self) {
@@ -620,13 +634,10 @@ where
             {
                 return;
             }
-            if self
-                .shared
-                .queued_bytes
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
-                    n.checked_add(reserved).filter(|n| *n <= self.shared.queue_limit)
-                })
-                .is_err()
+            if atomic_usize_fetch_update(&self.shared.queued_bytes, Ordering::SeqCst, Ordering::SeqCst, |n| {
+                n.checked_add(reserved).filter(|n| *n <= self.shared.queue_limit)
+            })
+            .is_err()
             {
                 return;
             }

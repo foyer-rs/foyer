@@ -70,6 +70,20 @@ pub struct S3FifoState {
     queue: Queue,
 }
 
+// `Atomic*::try_update` stabilized in Rust 1.95 and is still unstable on MSRV 1.91.
+// Rust 1.99 deprecates `fetch_update` as a rename of that same operation.
+#[expect(clippy::allow_attributes)]
+#[allow(deprecated)]
+#[inline]
+fn atomic_u8_fetch_update(
+    atomic: &AtomicU8,
+    set_order: Ordering,
+    fetch_order: Ordering,
+    f: impl FnMut(u8) -> Option<u8>,
+) -> std::result::Result<u8, u8> {
+    atomic.fetch_update(set_order, fetch_order, f)
+}
+
 impl S3FifoState {
     const MAX_FREQUENCY: u8 = 3;
 
@@ -82,17 +96,17 @@ impl S3FifoState {
     }
 
     fn inc_frequency(&self) -> u8 {
-        self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| {
-                Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
-            })
-            .unwrap()
+        atomic_u8_fetch_update(&self.frequency, Ordering::Release, Ordering::Acquire, |v| {
+            Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
+        })
+        .unwrap()
     }
 
     fn dec_frequency(&self) -> u8 {
-        self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
-            .unwrap()
+        atomic_u8_fetch_update(&self.frequency, Ordering::Release, Ordering::Acquire, |v| {
+            Some(v.saturating_sub(1))
+        })
+        .unwrap()
     }
 }
 
