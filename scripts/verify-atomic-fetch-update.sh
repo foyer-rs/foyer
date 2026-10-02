@@ -45,11 +45,13 @@ run() {
     return "$code"
 }
 
-# MSRV: try_update stays unused, and the local allow still satisfies clippy.
+# MSRV 1.91: compare_exchange_weak loops compile, and clippy stays clean.
 run 1.91.0 fmt --all -- --check || exit $?
 run 1.91.0 clippy -p foyer-opendal --all-targets --features test-redis -- -D warnings || exit $?
 run 1.91.0 clippy --all-targets --features tokio-console -- -D warnings -A clippy::large_enum_variant || exit $?
 run 1.91.0 clippy --all-targets -- -D warnings || exit $?
+run 1.91.0 test -p foyer-memory --lib eviction::s3fifo -- --test-threads=8 || exit $?
+run 1.91.0 test -p foyer-opendal --lib -- --test-threads=8 || exit $?
 
 # Same commands as the stable CI clippy step, both serde matrix cells.
 run stable fmt --all -- --check || exit $?
@@ -68,5 +70,7 @@ run stable clippy --all-targets --features serde -- -D warnings || exit $?
 
 # The opendal-redis job is stable-only.
 run stable clippy -p foyer-opendal --all-targets --features test-redis -- -D warnings || exit $?
+run stable test -p foyer-memory --lib eviction::s3fifo -- --test-threads=8 || exit $?
+run stable test -p foyer-opendal --lib -- --test-threads=8 || exit $?
 
 echo "ALL_OK" | tee -a "$LOG"
