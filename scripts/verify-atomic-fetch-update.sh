@@ -37,8 +37,10 @@ fi
 run() {
     local toolchain=$1
     shift
+    local target_dir="${CODE_DIR}/../foyer-atomic-deprecation-targets/${toolchain}"
+    mkdir -p "$target_dir"
     echo "CMD: cargo +${toolchain} $*" | tee -a "$LOG"
-    CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR="${CODE_DIR}/target-${toolchain}" \
+    CARGO_BUILD_JOBS=4 CARGO_TARGET_DIR="$target_dir" \
         cargo +"$toolchain" "$@" >>"$LOG" 2>&1
     local code=$?
     echo "EXIT:${code}" | tee -a "$LOG"
