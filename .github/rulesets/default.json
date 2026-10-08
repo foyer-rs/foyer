@@ -1,0 +1,219 @@
+{
+  "id": 2665193,
+  "name": "default",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "~DEFAULT_BRANCH"
+      ]
+    }
+  },
+  "bypass_actors": [
+    {
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
+      "bypass_mode": "always"
+    }
+  ],
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "required_linear_history"
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "GitGuardian Security Checks",
+            "integration_id": 46505
+          },
+          {
+            "context": "check build with madsim",
+            "integration_id": 15368
+          },
+          {
+            "context": "run with single worker thread and deadlock detection",
+            "integration_id": 15368
+          },
+          {
+            "context": "run with address saniziter",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust ffmt check (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust ffmt check (ubuntu-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust ffmt check (windows-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (macos-latest, stable)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-latest, stable)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (windows-latest, stable)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust udeps test (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust udeps test (ubuntu-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust udeps test (windows-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "license-header-check",
+            "integration_id": 15368
+          },
+          {
+            "context": "misc check",
+            "integration_id": 15368
+          },
+          {
+            "context": "DCO",
+            "integration_id": 1861
+          },
+          {
+            "context": "rust doc test (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust doc test (ubuntu-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust doc test (windows-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust machete check",
+            "integration_id": 15368
+          },
+          {
+            "context": "cargo manifest check",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust doc test (ubuntu-24.04-arm)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust ffmt check (ubuntu-24.04-arm)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-24.04-arm, stable)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust udeps test (ubuntu-24.04-arm)",
+            "integration_id": 15368
+          },
+          {
+            "context": "foyer bench fuzzy test with codecov (ubuntu-latest, stable)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (macos-latest, stable, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-24.04-arm, stable, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-latest, stable, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (windows-latest, stable, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "foyer bench fuzzy test with codecov (ubuntu-latest, 1.95.0)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (macos-latest, 1.95.0)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (macos-latest, 1.95.0, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-24.04-arm, 1.95.0)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-24.04-arm, 1.95.0, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-latest, 1.95.0)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (ubuntu-latest, 1.95.0, --features serde)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (windows-latest, 1.95.0)",
+            "integration_id": 15368
+          },
+          {
+            "context": "rust test with codecov (windows-latest, 1.95.0, --features serde)",
+            "integration_id": 15368
+          }
+        ]
+      }
+    },
+    {
+      "type": "creation"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 1,
+        "dismiss_stale_reviews_on_push": false,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "dismissal_restriction": {
+          "enabled": false,
+          "allowed_actors": []
+        },
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "require_extra_approval_for_unattributed_changes": true,
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      }
+    }
+  ]
+}

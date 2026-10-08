@@ -1,0 +1,79 @@
+name: Rulesets
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/rulesets/**'
+      - '.github/scripts/*rulesets*.py'
+      - '.github/workflows/rulesets.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.github/rulesets/**'
+      - '.github/scripts/*rulesets*.py'
+      - '.github/workflows/rulesets.yml'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Apply the rulesets from the latest main commit
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate rulesets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Validate configuration and test synchronizer
+        run: |
+          python3 .github/scripts/sync_rulesets.py --validate
+          python3 -m unittest discover -s .github/scripts -p 'test_rulesets.py'
+      - name: Preview changes without administrative credentials
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/sync_rulesets.py
+
+  sync:
+    name: sync rulesets
+    needs: validate
+    environment: rulesets
+    if: >-
+      github.repository == 'foyer-rs/foyer' &&
+      github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: rulesets-sync
+      cancel-in-progress: false
+    steps:
+      # Re-runs must reconcile the latest configuration, not restore an old commit.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Validate the latest configuration
+        run: |
+          python3 .github/scripts/sync_rulesets.py --validate
+          python3 -m unittest discover -s .github/scripts -p 'test_rulesets.py'
+      - name: Preview or apply rulesets
+        env:
+          GH_TOKEN: ${{ secrets.RULESETS_TOKEN }}
+          APPLY: ${{ github.event_name == 'push' || inputs.apply }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Configure RULESETS_TOKEN with repository Administration: write permission."
+            exit 1
+          fi
+          if [ "$APPLY" = "true" ]; then
+            python3 .github/scripts/sync_rulesets.py --apply
+          else
+            python3 .github/scripts/sync_rulesets.py
+          fi
