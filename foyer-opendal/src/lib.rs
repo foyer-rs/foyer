@@ -310,7 +310,7 @@ where
     fn release_queued(&self, n: usize) {
         let _ = self
             .queued_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| Some(v.saturating_sub(n)));
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |v| Some(v.saturating_sub(n)));
     }
 
     fn abandon_inflight(&self) {
@@ -623,7 +623,7 @@ where
             if self
                 .shared
                 .queued_bytes
-                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                     n.checked_add(reserved).filter(|n| *n <= self.shared.queue_limit)
                 })
                 .is_err()

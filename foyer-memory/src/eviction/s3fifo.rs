@@ -83,7 +83,7 @@ impl S3FifoState {
 
     fn inc_frequency(&self) -> u8 {
         self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| {
+            .try_update(Ordering::Release, Ordering::Acquire, |v| {
                 Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
             })
             .unwrap()
@@ -91,7 +91,7 @@ impl S3FifoState {
 
     fn dec_frequency(&self) -> u8 {
         self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
+            .try_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
             .unwrap()
     }
 }
