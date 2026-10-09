@@ -28,7 +28,7 @@ use equivalent::Equivalent;
 use foyer_common::{
     code::{HashBuilder, Key},
     error::Result,
-    properties::Properties,
+    properties::{Properties, Source},
 };
 use futures_util::future::BoxFuture;
 use hashbrown::hash_table::{Entry, HashTable};
@@ -54,6 +54,44 @@ pub type RequiredFetchBuilderErased<K, V, P> =
 pub type Waiter<T> = oneshot::Recv<Result<T>>;
 /// A notifier for a fetch operation.
 pub type Notifier<T> = oneshot::Sender<Result<T>>;
+
+/// Observe a lookup's result before it is delivered to the caller.
+#[doc(hidden)]
+pub trait FetchObserver: FnOnce(Result<Option<Source>>) + Send + Sync + 'static {}
+impl<T> FetchObserver for T where T: FnOnce(Result<Option<Source>>) + Send + Sync + 'static {}
+
+/// A fetch notifier with an optional per-request completion observer.
+#[doc(hidden)]
+pub struct FetchNotifier<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    sender: Notifier<Option<RawCacheEntry<E, S, I>>>,
+    observer: Option<Box<dyn FetchObserver>>,
+}
+
+impl<E, S, I> FetchNotifier<E, S, I>
+where
+    E: Eviction,
+    S: HashBuilder,
+    I: Indexer<Eviction = E>,
+{
+    pub(crate) fn send(self, result: Result<Option<RawCacheEntry<E, S, I>>>) {
+        // Record completion even if the caller has dropped its receiver. Run the
+        // observer before waking the caller, and outside the cache shard lock.
+        if let Some(observer) = self.observer {
+            observer(
+                result
+                    .as_ref()
+                    .map(|entry| entry.as_ref().map(RawCacheEntry::source))
+                    .map_err(Clone::clone),
+            );
+        }
+        let _ = self.sender.send(result);
+    }
+}
 
 fn erase_required_fetch_builder<K, V, P, C, F>(f: F) -> RequiredFetchBuilderErased<K, V, P>
 where
@@ -129,7 +167,7 @@ where
 {
     id: usize,
     close: Arc<AtomicBool>,
-    notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+    notifiers: Vec<FetchNotifier<E, S, I>>,
     // If a required fetch request comes in while there is already an inflight,
     // we store the fetch builder here to let the leader perform the fetch later.
     f: Option<RequiredFetchBuilderErased<E::Key, E::Value, E::Properties>>,
@@ -188,6 +226,7 @@ where
         hash: u64,
         key: &Q,
         f: Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        observer: Option<Box<dyn FetchObserver>>,
     ) -> Enqueue<E, S, I, C>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
@@ -200,7 +239,7 @@ where
                     entry.inflight.f = f.map(erase_required_fetch_builder);
                 }
                 let (tx, rx) = oneshot::channel();
-                entry.inflight.notifiers.push(tx);
+                entry.inflight.notifiers.push(FetchNotifier { sender: tx, observer });
                 Enqueue::Wait(rx.into_future())
             }
             Entry::Vacant(v) => {
@@ -213,7 +252,7 @@ where
                     inflight: Inflight {
                         id,
                         close: Arc::new(AtomicBool::new(false)),
-                        notifiers: vec![tx],
+                        notifiers: vec![FetchNotifier { sender: tx, observer }],
                         f: None,
                     },
                 };
@@ -229,13 +268,7 @@ where
         }
     }
 
-    #[expect(clippy::type_complexity)]
-    pub fn take<Q>(
-        &mut self,
-        hash: u64,
-        key: &Q,
-        id: Option<usize>,
-    ) -> Option<Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>>
+    pub fn take<Q>(&mut self, hash: u64, key: &Q, id: Option<usize>) -> Option<Vec<FetchNotifier<E, S, I>>>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized,
     {
@@ -303,5 +336,5 @@ where
     I: Indexer<Eviction = E>,
 {
     Fetch(RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>),
-    Notifiers(Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>),
+    Notifiers(Vec<FetchNotifier<E, S, I>>),
 }

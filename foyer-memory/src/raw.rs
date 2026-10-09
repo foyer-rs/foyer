@@ -47,8 +47,8 @@ use crate::{
     eviction::{Eviction, Op},
     indexer::{Indexer, hash_table::HashTableIndexer, sentry::Sentry},
     inflight::{
-        Enqueue, FetchOrTake, FetchTarget, InflightManager, Notifier, OptionalFetch, OptionalFetchBuilder,
-        RequiredFetch, RequiredFetchBuilder, Waiter,
+        Enqueue, FetchNotifier, FetchObserver, FetchOrTake, FetchTarget, InflightManager, OptionalFetch,
+        OptionalFetchBuilder, RequiredFetch, RequiredFetchBuilder, Waiter,
     },
     pipe::{ArcPipe, NoopPipe},
     record::{Data, Record},
@@ -137,12 +137,11 @@ where
         }
     }
 
-    #[expect(clippy::type_complexity)]
     fn emplace(
         &mut self,
         record: Arc<Record<E>>,
         garbages: &mut Vec<(Event, Arc<Record<E>>)>,
-        notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+        notifiers: &mut Vec<FetchNotifier<E, S, I>>,
     ) {
         *notifiers = self
             .inflights
@@ -646,7 +645,7 @@ where
 
         // Notify waiters out of the lock critical section.
         for notifier in notifiers {
-            let _ = notifier.send(Ok(Some(RawCacheEntry {
+            notifier.send(Ok(Some(RawCacheEntry {
                 pipe: self.pipe.clone(),
                 record: record.clone(),
                 inner: self.inner.clone(),
@@ -1049,10 +1048,6 @@ where
     ///
     /// This function is for internal usage and the doc is hidden.
     #[doc(hidden)]
-    #[cfg_attr(
-        feature = "tracing",
-        fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
-    )]
     pub fn get_or_fetch_inner<Q, C, FO, FR>(
         &self,
         key: &Q,
@@ -1060,6 +1055,30 @@ where
         fr: FR,
         ctx: C,
         spawner: &Spawner,
+    ) -> RawGetOrFetch<E, S, I>
+    where
+        Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
+        C: Any + Send + Sync + 'static,
+        FO: FnOnce() -> Option<OptionalFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+        FR: FnOnce() -> Option<RequiredFetchBuilder<E::Key, E::Value, E::Properties, C>>,
+    {
+        self.get_or_fetch_observed(key, fo, fr, ctx, spawner, None::<fn(Result<Option<Source>>)>)
+    }
+
+    /// Internal lookup with a per-request observer, independent of result consumption.
+    #[doc(hidden)]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::raw::get_or_fetch_inner")
+    )]
+    pub fn get_or_fetch_observed<Q, C, FO, FR>(
+        &self,
+        key: &Q,
+        fo: FO,
+        fr: FR,
+        ctx: C,
+        spawner: &Spawner,
+        mut observer: Option<impl FetchObserver>,
     ) -> RawGetOrFetch<E, S, I>
     where
         Q: Hash + Equivalent<E::Key> + ?Sized + ToOwned<Owned = E::Key>,
@@ -1079,34 +1098,43 @@ where
                     source: Source::Memory,
                 }))
             })
-            .unwrap_or_else(|| match inflights.lock().enqueue(hash, key, fr()) {
-                Enqueue::Lead {
-                    id,
-                    close,
-                    waiter,
-                    required_fetch_builder,
-                } => {
-                    let fetch = RawFetch {
-                        state: RawFetchState::Init {
-                            optional_fetch_builder: fo(),
-                            required_fetch_builder,
-                        },
+            .unwrap_or_else(|| {
+                match inflights.lock().enqueue(
+                    hash,
+                    key,
+                    fr(),
+                    observer
+                        .take()
+                        .map(|observer| Box::new(observer) as Box<dyn FetchObserver>),
+                ) {
+                    Enqueue::Lead {
                         id,
-                        hash,
-                        key: Some(key.to_owned()),
-                        ctx,
-                        cache: self.clone(),
-                        inflights: inflights.clone(),
                         close,
-                    };
-                    spawner.spawn(fetch);
-                    RawGetOrFetch::Miss(RawWait { waiter })
+                        waiter,
+                        required_fetch_builder,
+                    } => {
+                        let fetch = RawFetch {
+                            state: RawFetchState::Init {
+                                optional_fetch_builder: fo(),
+                                required_fetch_builder,
+                            },
+                            id,
+                            hash,
+                            key: Some(key.to_owned()),
+                            ctx,
+                            cache: self.clone(),
+                            inflights: inflights.clone(),
+                            close,
+                        };
+                        spawner.spawn(fetch);
+                        RawGetOrFetch::Miss(RawWait { waiter })
+                    }
+                    Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
                 }
-                Enqueue::Wait(waiter) => RawGetOrFetch::Miss(RawWait { waiter }),
             })
         };
 
-        match E::acquire() {
+        let result = match E::acquire() {
             Op::Noop => self.inner.shards[self.shard(hash)]
                 .read()
                 .with(|shard| extract(key, shard.get_noop(hash, key), &shard.inflights)),
@@ -1116,7 +1144,11 @@ where
             Op::Mutable(_) => self.inner.shards[self.shard(hash)]
                 .write()
                 .with(|mut shard| extract(key, shard.get_mutable(hash, key), &shard.inflights)),
+        };
+        if let Some(observer) = observer {
+            observer(Ok(Some(Source::Memory)));
         }
+        result
     }
 }
 
@@ -1244,7 +1276,7 @@ where
     },
     Notify {
         res: Option<Result<Option<RawCacheEntry<E, S, I>>>>,
-        notifiers: Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+        notifiers: Vec<FetchNotifier<E, S, I>>,
     },
     Ready,
 }
@@ -1498,20 +1530,19 @@ where
         })
     }
 
-    #[expect(clippy::type_complexity)]
     fn handle_notify(
         res: Result<Option<RawCacheEntry<E, S, I>>>,
-        notifiers: &mut Vec<Notifier<Option<RawCacheEntry<E, S, I>>>>,
+        notifiers: &mut Vec<FetchNotifier<E, S, I>>,
     ) -> Try<E, S, I, C> {
         match res {
             Ok(e) => {
                 for notifier in notifiers.drain(..) {
-                    let _ = notifier.send(Ok(e.clone()));
+                    notifier.send(Ok(e.clone()));
                 }
             }
             Err(e) => {
                 for notifier in notifiers.drain(..) {
-                    let _ = notifier.send(Err(e.clone()));
+                    notifier.send(Err(e.clone()));
                 }
             }
         }
@@ -1532,16 +1563,15 @@ where
             RawFetchState::Notify { .. } | RawFetchState::Ready => return,
             RawFetchState::Init { .. } | RawFetchState::FetchOptional { .. } | RawFetchState::FetchRequired { .. } => {}
         }
-        if let Some(notifiers) = this
+        let notifiers = this
             .inflights
             .lock()
-            .take(*this.hash, this.key.as_ref().unwrap(), Some(*this.id))
-        {
+            .take(*this.hash, this.key.as_ref().unwrap(), Some(*this.id));
+        if let Some(notifiers) = notifiers {
             for notifier in notifiers {
-                let _ =
-                    notifier
-                        .send(Err(Error::new(ErrorKind::TaskCancelled, "fetch task cancelled")
-                            .with_context("hash", *this.hash)));
+                notifier.send(Err(
+                    Error::new(ErrorKind::TaskCancelled, "fetch task cancelled").with_context("hash", *this.hash)
+                ));
             }
         }
     }
@@ -1590,6 +1620,45 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_fetch_observer_task_cancelled() {
+        let cache = fifo_cache_for_test();
+        let hash = std::hash::BuildHasher::hash_one(&*cache.inner.hash_builder, 1u64);
+        let inflights = cache.inner.shards[cache.shard(hash)].read().inflights.clone();
+        let outcomes = Arc::new(Mutex::new(vec![]));
+        let observed = outcomes.clone();
+        let reentrant_cache = cache.clone();
+        let Enqueue::Lead { id, close, waiter, .. } = inflights.lock().enqueue::<_, ()>(
+            hash,
+            &1,
+            None,
+            Some(Box::new(move |result: Result<Option<Source>>| {
+                // Observers must run after releasing both shard and inflight locks.
+                reentrant_cache.insert(1, 1);
+                observed.lock().push(result.unwrap_err().kind());
+            })),
+        ) else {
+            panic!("expected fetch leader");
+        };
+        let fetch: RawFetch<_, _, _, ()> = RawFetch {
+            state: RawFetchState::Init {
+                optional_fetch_builder: None,
+                required_fetch_builder: None,
+            },
+            id,
+            hash,
+            key: Some(1),
+            ctx: (),
+            cache,
+            inflights,
+            close,
+        };
+        drop(fetch);
+        assert_eq!(*outcomes.lock(), vec![ErrorKind::TaskCancelled]);
+        assert_eq!(waiter.await.unwrap().unwrap_err().kind(), ErrorKind::TaskCancelled);
+        assert_eq!(outcomes.lock().len(), 1);
     }
 
     #[expect(clippy::type_complexity)]
