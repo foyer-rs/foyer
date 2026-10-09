@@ -130,6 +130,13 @@ use foyer::{
 };
 use tempfile::tempdir;
 
+fn nonzero(value: usize) -> NonZeroUsize {
+    match NonZeroUsize::new(value) {
+        Some(value) => value,
+        None => unreachable!("example constants are nonzero"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let dir = tempdir()?;
@@ -142,7 +149,7 @@ async fn main() -> anyhow::Result<()> {
                 .with_write_iops(2000)
                 .with_write_throughput(100 * 1024 * 1024)
                 .with_read_throughput(800 * 1024 * 1024)
-                .with_iops_counter(IopsCounter::PerIoSize(NonZeroUsize::new(128 * 1024).unwrap())),
+                .with_iops_counter(IopsCounter::PerIoSize(nonzero(128 * 1024))),
         )
         .build()?;
 
@@ -162,10 +169,10 @@ async fn main() -> anyhow::Result<()> {
         .with_engine_config(
             BlockEngineConfig::new(device)
                 .with_block_size(16 * 1024 * 1024)
-                .with_indexer_shards(64)
-                .with_recover_concurrency(8)
-                .with_flushers(2)
-                .with_reclaimers(2)
+                .with_indexer_shards(nonzero(64))
+                .with_recover_concurrency(nonzero(8))
+                .with_flushers(nonzero(2))
+                .with_reclaimers(nonzero(2))
                 .with_buffer_pool_size(256 * 1024 * 1024)
                 .with_clean_block_threshold(4)
                 .with_eviction_pickers(vec![Box::<FifoPicker>::default()])
