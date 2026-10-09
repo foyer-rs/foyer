@@ -59,6 +59,8 @@ io-uring = { workspace = true }
 [dev-dependencies]
 bytesize = { workspace = true }
 foyer-memory = { workspace = true, features = ["test_utils"] }
+# Used to assert on the metrics counters in the unit tests.
+mixtrics = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true, features = ["trace", "color"] }
 tokio = { workspace = true }
