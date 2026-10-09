@@ -47,7 +47,7 @@ pub enum ErrorKind {
     MagicMismatch,
     /// Out of range.
     OutOfRange,
-    /// No sapce.
+    /// No space.
     NoSpace,
     /// Closed.
     Closed,

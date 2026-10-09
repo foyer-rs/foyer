@@ -1,0 +1,9 @@
+[header]
+builtin = "Apache-2.0"
+
+[files]
+includes = ['**/*.rs']
+
+[props]
+copyright_owner = "foyer Project Authors"
+inception_year = 2026

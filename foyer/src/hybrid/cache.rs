@@ -243,9 +243,7 @@ where
         let store = self.store.clone();
         Box::pin(async move {
             store.wait().await;
-            let device = store.device();
-            let throttler = device
-                .statistics()
+            let throttler = store
                 .throttle()
                 .write_throughput
                 .map(|v| RateLimiter::new(v.get() as _));
@@ -597,6 +595,10 @@ where
 
     /// Check if the hybrid cache contains a cached entry with the given key.
     ///
+    /// `contains` covers the in-memory cache and the disk cache. Besides the disk cache entries that are already
+    /// written to the device, `contains` may also return `true` for an entry that was recently enqueued to the disk
+    /// cache but not yet flushed. Whether such an in-flight entry is reported is not guaranteed.
+    ///
     /// `contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn contains<Q>(&self, key: &Q) -> bool
     where
@@ -610,6 +612,19 @@ where
         self.inner.memory.clear();
         self.inner.storage.destroy().await?;
         Ok(())
+    }
+
+    /// Flush in-memory entries matching the predicate to the disk cache.
+    ///
+    /// The matching entries are removed from the in-memory cache. This function obeys the io throttler of the disk
+    /// cache and makes sure all matching entries are offloaded.
+    ///
+    /// The predicate is called while holding a shard lock and must not access this cache.
+    pub async fn flush_if<F>(&self, predicate: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.inner.memory.flush_if(predicate).await;
     }
 
     /// Gracefully close the hybrid cache.
@@ -967,14 +982,13 @@ where
         let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll(cx));
 
-        if let Ok(entry) = res.as_ref() {
-            if entry.properties().location() != Location::InMem
-                && *this.policy == HybridCachePolicy::WriteOnInsertion
-                && this.store.is_enabled()
-                && !this.ctx.throttled.load(Ordering::Relaxed)
-            {
-                this.store.enqueue(entry.piece(), false);
-            }
+        if let Ok(entry) = res.as_ref()
+            && entry.properties().location() != Location::InMem
+            && *this.policy == HybridCachePolicy::WriteOnInsertion
+            && this.store.is_enabled()
+            && !this.ctx.throttled.load(Ordering::Relaxed)
+        {
+            this.store.enqueue(entry.piece(), false);
         }
 
         match res.as_ref() {
@@ -1041,9 +1055,9 @@ where
 mod tests {
     use std::{path::Path, sync::Arc};
 
+    use asyncband::barrier::Barrier;
     use foyer_common::{hasher::ModHasher, properties::Source};
     use foyer_storage::{StorageFilter, test_utils::*};
-    use mea::barrier::Barrier;
     use storage::test_utils::Biased;
 
     use crate::*;
@@ -1079,6 +1093,33 @@ mod tests {
             .build()
             .await
             .unwrap()
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_in_memory() {
+        let hybrid: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+
+        assert!(hybrid.storage().device().is_none());
+        assert!(!hybrid.storage().is_enabled());
+        assert!(!hybrid.is_hybrid());
+
+        hybrid.insert(1, 1);
+        if hybrid.is_hybrid() {
+            hybrid.flush_if(|_, _| true).await;
+        }
+        assert_eq!(hybrid.memory().get(&1).unwrap().value(), &1);
+        hybrid.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_is_hybrid_with_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+
+        assert!(hybrid.storage().device().unwrap().capacity() > 0);
+        assert!(hybrid.storage().is_enabled());
+        assert!(hybrid.is_hybrid());
+        hybrid.close().await.unwrap();
     }
 
     #[test_log::test(tokio::test)]
@@ -1462,6 +1503,25 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_flush_if() {
+        let dir = tempfile::tempdir().unwrap();
+        let hybrid = open(dir.path()).await;
+        hybrid.insert(1, vec![1; 7 * KB]);
+        hybrid.insert(2, vec![2; 7 * KB]);
+
+        hybrid.flush_if(|key, _| *key == 1).await;
+        hybrid.storage().wait().await;
+
+        assert!(hybrid.memory().get(&1).is_none());
+        assert!(hybrid.memory().get(&2).is_some());
+        assert_eq!(
+            hybrid.storage().load(&1).await.unwrap().kv().unwrap(),
+            (1, vec![1; 7 * KB])
+        );
+        assert!(hybrid.storage().load(&2).await.unwrap().is_miss());
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_load_after_recovery() {
         let open = |dir| async move {
             HybridCacheBuilder::new()
@@ -1570,6 +1630,40 @@ mod tests {
             .unwrap();
         assert_eq!(e5.source(), Source::Disk);
         drop(e5);
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_hybrid_cache_contains_in_flight_entry() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let flush_switch = Switch::default();
+
+        let hybrid = open_with(
+            dir.path(),
+            |b| b.with_policy(HybridCachePolicy::WriteOnInsertion),
+            |b| b.with_flush_switch(flush_switch.clone()),
+        )
+        .await;
+
+        // Hold the flusher, so that the inserted entry stays in the disk cache write queue.
+        flush_switch.on();
+
+        drop(hybrid.insert(1, vec![1; 7 * KB]));
+        // Drop the in-memory copy, so that only the disk cache can answer for the entry.
+        hybrid.memory().remove(&1);
+        assert!(!hybrid.memory().contains(&1));
+
+        // The entry is in-flight but still retrievable, so `contains` must report it.
+        assert!(hybrid.contains(&1));
+        assert_eq!(hybrid.get(&1).await.unwrap().unwrap().value(), &vec![1; 7 * KB]);
+
+        // Let the flusher write the entry to the device.
+        flush_switch.off();
+        hybrid.storage().wait().await;
+
+        hybrid.memory().remove(&1);
+        assert!(hybrid.contains(&1));
+        assert!(!hybrid.contains(&2));
     }
 
     #[test_log::test(tokio::test)]

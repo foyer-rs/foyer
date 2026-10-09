@@ -74,7 +74,7 @@ impl FromStr for IopsCounter {
 }
 
 /// Throttle config for the device.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct Throttle {
@@ -91,42 +91,54 @@ pub struct Throttle {
     #[cfg_attr(feature = "clap", clap(long))]
     pub read_throughput: Option<NonZeroUsize>,
     /// The iops counter for the device.
-    #[cfg_attr(feature = "clap", clap(long, default_value = "PerIo"))]
+    #[cfg_attr(feature = "clap", clap(long, default_value_t))]
     pub iops_counter: IopsCounter,
+}
+
+impl Default for Throttle {
+    fn default() -> Self {
+        Throttle::new()
+    }
 }
 
 impl Throttle {
     /// Create a new unlimited throttle config.
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            write_iops: None,
+            read_iops: None,
+            write_throughput: None,
+            read_throughput: None,
+            iops_counter: IopsCounter::PerIo,
+        }
     }
 
     /// Set the maximum write iops for the device.
-    pub fn with_write_iops(mut self, iops: usize) -> Self {
+    pub const fn with_write_iops(mut self, iops: usize) -> Self {
         self.write_iops = NonZeroUsize::new(iops);
         self
     }
 
     /// Set the maximum read iops for the device.
-    pub fn with_read_iops(mut self, iops: usize) -> Self {
+    pub const fn with_read_iops(mut self, iops: usize) -> Self {
         self.read_iops = NonZeroUsize::new(iops);
         self
     }
 
     /// Set the maximum write throughput for the device.
-    pub fn with_write_throughput(mut self, throughput: usize) -> Self {
+    pub const fn with_write_throughput(mut self, throughput: usize) -> Self {
         self.write_throughput = NonZeroUsize::new(throughput);
         self
     }
 
     /// Set the maximum read throughput for the device.
-    pub fn with_read_throughput(mut self, throughput: usize) -> Self {
+    pub const fn with_read_throughput(mut self, throughput: usize) -> Self {
         self.read_throughput = NonZeroUsize::new(throughput);
         self
     }
 
     /// Set the iops counter for the device.
-    pub fn with_iops_counter(mut self, counter: IopsCounter) -> Self {
+    pub const fn with_iops_counter(mut self, counter: IopsCounter) -> Self {
         self.iops_counter = counter;
         self
     }

@@ -83,7 +83,7 @@ impl S3FifoState {
 
     fn inc_frequency(&self) -> u8 {
         self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| {
+            .try_update(Ordering::Release, Ordering::Acquire, |v| {
                 Some(std::cmp::min(Self::MAX_FREQUENCY, v + 1))
             })
             .unwrap()
@@ -91,7 +91,7 @@ impl S3FifoState {
 
     fn dec_frequency(&self) -> u8 {
         self.frequency
-            .fetch_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
+            .try_update(Ordering::Release, Ordering::Acquire, |v| Some(v.saturating_sub(1)))
             .unwrap()
     }
 }
@@ -126,10 +126,10 @@ where
 {
     fn evict(&mut self) -> Option<Arc<Record<S3Fifo<K, V, P>>>> {
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if self.small_weight > self.small_weight_capacity {
-            if let Some(record) = self.evict_small() {
-                return Some(record);
-            }
+        if self.small_weight > self.small_weight_capacity
+            && let Some(record) = self.evict_small()
+        {
+            return Some(record);
         }
         if let Some(record) = self.evict_main() {
             return Some(record);

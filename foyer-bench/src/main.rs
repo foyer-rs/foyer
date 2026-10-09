@@ -28,12 +28,13 @@ use std::{
     ops::{Deref, Range},
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use analyze::{Metrics, analyze, monitor};
+use asyncband::oneshot;
 use bytesize::ByteSize;
 use clap::{ArgGroup, Parser, builder::PossibleValuesParser};
 use exporter::PrometheusExporter;
@@ -47,7 +48,6 @@ use foyer::{
 };
 use futures_util::future::join_all;
 use itertools::Itertools;
-use mea::{broadcast, oneshot};
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use prometheus::Registry;
 use rand::{
@@ -419,8 +419,31 @@ fn setup() {
 
 #[cfg(feature = "tracing")]
 fn setup() {
+    use std::borrow::Cow;
+
     use fastrace::collector::Config;
-    let reporter = fastrace_jaeger::JaegerReporter::new("127.0.0.1:6831".parse().unwrap(), "foyer-bench").unwrap();
+    use fastrace_opentelemetry::OpenTelemetryReporter;
+    use opentelemetry::{InstrumentationScope, KeyValue};
+    use opentelemetry_otlp::{SpanExporter, WithExportConfig};
+    use opentelemetry_sdk::Resource;
+
+    let reporter = OpenTelemetryReporter::new(
+        SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint("http://127.0.0.1:4317".to_string())
+            .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+            .with_timeout(opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT)
+            .build()
+            .expect("initialize otlp exporter"),
+        Cow::Owned(
+            Resource::builder()
+                .with_attributes([KeyValue::new("service.name", "foyer-bench")])
+                .build(),
+        ),
+        InstrumentationScope::builder("foyer-bench")
+            .with_version(env!("CARGO_PKG_VERSION"))
+            .build(),
+    );
     fastrace::set_reporter(reporter, Config::default().report_interval(Duration::from_millis(1)));
 }
 
@@ -657,7 +680,7 @@ async fn benchmark(args: Args) {
 
     let metrics_dump_start = metrics.dump();
 
-    let (stop_tx, _) = broadcast::overflow::channel(4096);
+    let stop = Arc::new(AtomicBool::new(false));
 
     let handle_monitor = tokio::spawn({
         let metrics = metrics.clone();
@@ -668,18 +691,18 @@ async fn benchmark(args: Args) {
             Duration::from_secs(args.time),
             Duration::from_secs(args.warm_up),
             metrics,
-            stop_tx.subscribe(),
+            stop.clone(),
         )
     });
 
     let time = Instant::now();
 
-    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop_tx.clone()));
+    let handle_bench = tokio::spawn(bench(args.clone(), hybrid.clone(), metrics.clone(), stop.clone()));
 
     let handle_signal = tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         tracing::warn!("foyer-bench is cancelled with CTRL-C");
-        stop_tx.send(());
+        stop.store(true, Ordering::Relaxed);
     });
 
     handle_bench.await.unwrap();
@@ -709,12 +732,7 @@ async fn benchmark(args: Args) {
     teardown();
 }
 
-async fn bench(
-    args: Args,
-    hybrid: HybridCache<u64, Value>,
-    metrics: Metrics,
-    stop_tx: broadcast::overflow::Sender<()>,
-) {
+async fn bench(args: Args, hybrid: HybridCache<u64, Value>, metrics: Metrics, stop: Arc<AtomicBool>) {
     let w_rate = if args.w_rate.as_u64() == 0 {
         None
     } else {
@@ -744,22 +762,17 @@ async fn bench(
     });
 
     let w_handles = (0..args.writers)
-        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|id| tokio::spawn(write(id as u64, hybrid.clone(), context.clone(), stop.clone())))
         .collect_vec();
     let r_handles = (0..args.readers)
-        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop_tx.subscribe())))
+        .map(|_| tokio::spawn(read(hybrid.clone(), context.clone(), stop.clone())))
         .collect_vec();
 
     join_all(w_handles).await;
     join_all(r_handles).await;
 }
 
-async fn write(
-    id: u64,
-    hybrid: HybridCache<u64, Value>,
-    context: Arc<Context>,
-    mut stop: broadcast::overflow::Receiver<()>,
-) {
+async fn write(id: u64, hybrid: HybridCache<u64, Value>, context: Arc<Context>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
 
     let mut limiter = context.w_rate.map(RateLimiter::new);
@@ -806,9 +819,8 @@ async fn write(
     loop {
         let l = Instant::now();
 
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
         if start.elapsed() >= context.time + context.warm_up {
             return;
@@ -821,10 +833,10 @@ async fn write(
         };
 
         // TODO(MrCroxx): Use `let_chains` here after it is stable.
-        if let Some(limiter) = &mut limiter {
-            if let Some(wait) = limiter.consume(entry_size as f64) {
-                tokio::time::sleep(wait).await;
-            }
+        if let Some(limiter) = &mut limiter
+            && let Some(wait) = limiter.consume(entry_size as f64)
+        {
+            tokio::time::sleep(wait).await;
         }
 
         let time = Instant::now();
@@ -870,7 +882,7 @@ async fn write(
     }
 }
 
-async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: broadcast::overflow::Receiver<()>) {
+async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, stop: Arc<AtomicBool>) {
     let start = Instant::now();
 
     let mut limiter = context.r_rate.map(RateLimiter::new);
@@ -880,9 +892,8 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
     let mut osrng = StdRng::try_from_rng(&mut SysRng).unwrap();
 
     loop {
-        match stop.try_recv() {
-            Err(broadcast::overflow::TryRecvError::Empty) => {}
-            _ => return,
+        if stop.load(Ordering::Relaxed) {
+            return;
         }
         if start.elapsed() >= context.time + context.warm_up {
             return;
@@ -929,10 +940,10 @@ async fn read(hybrid: HybridCache<u64, Value>, context: Arc<Context>, mut stop: 
             assert_eq!(&text(idx as usize, entry_size), entry.value().inner.as_ref());
 
             // TODO(MrCroxx): Use `let_chains` here after it is stable.
-            if let Some(limiter) = &mut limiter {
-                if let Some(wait) = limiter.consume(entry_size as f64) {
-                    tokio::time::sleep(wait).await;
-                }
+            if let Some(limiter) = &mut limiter
+                && let Some(wait) = limiter.consume(entry_size as f64)
+            {
+                tokio::time::sleep(wait).await;
             }
 
             if record {

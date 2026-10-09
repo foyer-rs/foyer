@@ -12,14 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    fmt::Debug,
-    hash::Hash,
-    sync::Arc,
-    time::Instant,
-};
+use std::{any::TypeId, borrow::Cow, fmt::Debug, hash::Hash, sync::Arc, time::Instant};
 
 use equivalent::Equivalent;
 use foyer_common::{
@@ -42,7 +35,7 @@ use crate::{
     },
     io::{
         device::{Device, statistics::Statistics, throttle::Throttle},
-        engine::{IoEngineBuildContext, IoEngineConfig, monitor::MonitoredIoEngine, psync::PsyncIoEngineConfig},
+        engine::{IoEngineConfig, psync::PsyncIoEngineConfig},
     },
     keeper::Keeper,
     serde::EntrySerializer,
@@ -136,15 +129,9 @@ where
         tracing::trace!(hash = piece.hash(), "[store]: enqueue piece");
         let now = Instant::now();
 
-        if force
-            || self
-                .filter(
-                    piece.hash(),
-                    piece.key().estimated_size() + piece.value().estimated_size(),
-                )
-                .is_admitted()
-        {
-            let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+        let estimated_size = EntrySerializer::estimated_size(piece.key(), piece.value());
+
+        if force || self.filter(piece.hash(), estimated_size).is_admitted() {
             let rpiece = self.inner.keeper.insert(piece);
             self.inner.engine.enqueue(rpiece, estimated_size);
         } else {
@@ -261,13 +248,17 @@ where
 
     /// Check if the disk cache contains a cached entry with the given key.
     ///
-    /// `contains` may return a false-positive result if there is a hash collision with the given key.
+    /// Besides the entries that are already written to the device, `may_contains` may also return `true` for an entry
+    /// that was recently enqueued but not yet flushed, which [`Store::load`] can still serve from the keeper. Whether
+    /// such an in-flight entry is reported is not guaranteed.
+    ///
+    /// `may_contains` may return a false-positive result if there is a hash collision with the given key.
     pub fn may_contains<Q>(&self, key: &Q) -> bool
     where
         Q: Hash + Equivalent<K> + ?Sized,
     {
         let hash = self.inner.hasher.hash_one(key);
-        self.inner.engine.may_contains(hash)
+        self.inner.keeper.contains(hash, key) || self.inner.engine.may_contains(hash)
     }
 
     /// Delete all cached entries of the disk cache.
@@ -275,19 +266,19 @@ where
         self.inner.engine.destroy().await
     }
 
-    /// Get the device of the disk cache.
-    pub fn device(&self) -> &Arc<dyn Device> {
+    /// Get the block device, if the storage engine uses one.
+    pub fn device(&self) -> Option<&Arc<dyn Device>> {
         self.inner.engine.device()
     }
 
     /// Get the statistics information of the disk cache.
     pub fn statistics(&self) -> &Arc<Statistics> {
-        self.inner.engine.device().statistics()
+        self.inner.engine.statistics()
     }
 
     /// Get the io throttle of the disk cache.
     pub fn throttle(&self) -> &Throttle {
-        self.inner.engine.device().statistics().throttle()
+        self.inner.engine.statistics().throttle()
     }
 
     /// Get the spawner.
@@ -313,7 +304,7 @@ where
 
     /// If the disk cache is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.inner.engine.type_id() != TypeId::of::<Arc<NoopEngine<K, V, P>>>()
+        self.inner.engine.as_ref().type_id() != TypeId::of::<NoopEngine<K, V, P>>()
     }
 }
 
@@ -391,6 +382,8 @@ where
     /// Set io engine config for the disk cache store.
     ///
     /// Default: [`crate::io::engine::psync::PsyncIoEngineConfig`].
+    /// Engines that use block I/O construct this configuration when they build.
+    /// Engines with their own storage client do not construct it.
     pub fn with_io_engine_config(mut self, io_engine_builder: impl Into<Box<dyn IoEngineConfig>>) -> Self {
         self.io_engine_config = Some(io_engine_builder.into());
         self
@@ -453,21 +446,9 @@ where
 
         let spawner = self.spawner.unwrap_or_else(Spawner::current);
 
-        let io_engine_builder = match self.io_engine_config {
-            Some(builder) => builder,
-            None => {
-                tracing::info!(
-                    "[store builder]: No I/O engine builder is provided, use `PsyncIoEngineConfig` with default parameters as default."
-                );
-                PsyncIoEngineConfig::new().boxed()
-            }
-        };
-        let io_engine = io_engine_builder
-            .build(IoEngineBuildContext {
-                spawner: spawner.clone(),
-            })
-            .await?;
-        let io_engine = MonitoredIoEngine::new(io_engine, metrics.clone());
+        let io_engine_config = self
+            .io_engine_config
+            .unwrap_or_else(|| PsyncIoEngineConfig::new().boxed());
 
         let engine_builder = match self.engine_config {
             Some(eb) => eb,
@@ -482,7 +463,7 @@ where
 
         let engine = engine_builder
             .build(EngineBuildContext {
-                io_engine,
+                io_engine_config,
                 metrics: metrics.clone(),
                 spawner: spawner.clone(),
                 recover_mode: self.recover_mode,
@@ -582,6 +563,97 @@ mod tests {
         assert!(matches!(l1, Load::Miss));
         assert!(matches!(l2, Load::Entry { .. }));
         assert_eq!(l2.entry().unwrap().1, "bar");
+    }
+
+    #[tokio::test]
+    async fn test_may_contains_in_flight_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
+        let flush_switch = Switch::default();
+        flush_switch.on();
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_flush_switch(flush_switch.clone()),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), true);
+
+        // The entry is in-flight: `load` serves it from the keeper, so `may_contains` must agree.
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Piece { .. }));
+        assert!(store.may_contains(&1));
+        assert!(!store.may_contains(&2));
+
+        // Let the flusher write the entry to the device.
+        flush_switch.off();
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Entry { ref value, .. } if value == b"v1"));
+        assert!(store.may_contains(&1));
+        assert!(!store.may_contains(&2));
+    }
+
+    /// `delete` writes a tombstone to the engine indexer, but it does not evict the keeper. So an entry that is deleted
+    /// while still in-flight keeps being served by `load`, and `may_contains` reports it accordingly.
+    #[tokio::test]
+    async fn test_may_contains_in_flight_entry_after_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let metrics = Arc::new(Metrics::noop());
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+
+        // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
+        let flush_switch = Switch::default();
+        flush_switch.on();
+
+        let store = StoreBuilder::new("test", memory.clone(), metrics)
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(
+                BlockEngineConfig::new(
+                    FsDeviceBuilder::new(dir.path())
+                        .with_capacity(4 * 1024 * 1024)
+                        .build()
+                        .unwrap(),
+                )
+                .with_block_size(16 * 1024)
+                .with_flush_switch(flush_switch.clone()),
+            )
+            .build()
+            .await
+            .unwrap();
+
+        let e1 = memory.insert(1, b"v1".to_vec());
+        store.enqueue(e1.piece(), true);
+        store.delete(&1);
+
+        // The keeper still holds the in-flight entry, so `load` still serves it and `may_contains` agrees.
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Piece { .. }));
+        assert!(store.may_contains(&1));
+
+        // Once the flush finishes, the keeper releases the entry and the tombstone takes effect.
+        flush_switch.off();
+        store.wait().await;
+
+        let l1 = store.load(&1).await.unwrap();
+        assert!(matches!(l1, Load::Miss));
+        assert!(!store.may_contains(&1));
     }
 
     #[tokio::test]

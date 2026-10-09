@@ -14,9 +14,9 @@
 
 use std::sync::Arc;
 
+use asyncband::mutex::Mutex;
 use bytes::{Buf, BufMut};
 use foyer_common::error::Result;
-use mea::mutex::Mutex;
 
 use crate::{
     IoEngine,
@@ -30,9 +30,7 @@ pub struct Tombstone {
 }
 
 impl Tombstone {
-    const fn serialized_len() -> usize {
-        8 + 8
-    }
+    const SERIALIZED_LEN: usize = size_of::<u64>() + size_of::<u64>();
 
     fn write(&self, mut buf: impl BufMut) {
         buf.put_u64(self.hash);
@@ -59,7 +57,7 @@ struct TombstoneLogInner {
 }
 
 impl TombstoneLog {
-    pub const SLOTS_PER_PAGE: usize = PAGE / Tombstone::serialized_len();
+    pub const SLOTS_PER_PAGE: usize = PAGE / Tombstone::SERIALIZED_LEN;
 
     /// Open the tombstone log with given a dedicated device.
     ///
@@ -81,11 +79,11 @@ impl TombstoneLog {
                 let mut seq = 0;
                 let mut addr = 0;
 
-                for (slot, buf) in buffer.chunks_exact(Tombstone::serialized_len()).enumerate() {
+                for (slot, buf) in buffer.chunks_exact(Tombstone::SERIALIZED_LEN).enumerate() {
                     let tombstone = Tombstone::read(buf);
                     if tombstone.sequence > seq {
                         seq = tombstone.sequence;
-                        addr = slot * Tombstone::serialized_len();
+                        addr = slot * Tombstone::SERIALIZED_LEN;
                     }
                     if tombstone.sequence == 0 {
                         continue;
@@ -110,11 +108,11 @@ impl TombstoneLog {
 
         let latest_tombstone_page = latest_tombstone_offset / PAGE;
         let latest_tombstone_slot = if latest_tombstone_page == 0 {
-            latest_tombstone_offset / Tombstone::serialized_len()
+            latest_tombstone_offset / Tombstone::SERIALIZED_LEN
         } else {
             let pages_before_latest_tombstone = latest_tombstone_page - 1;
             Self::SLOTS_PER_PAGE * pages_before_latest_tombstone
-                + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::serialized_len()
+                + (latest_tombstone_offset - pages_before_latest_tombstone * PAGE) / Tombstone::SERIALIZED_LEN
         };
 
         let pages = partitions.iter().map(|p| p.size()).sum::<usize>() / PAGE;
@@ -131,7 +129,7 @@ impl TombstoneLog {
     fn calculate_slot_addr(pages: usize, slot: usize) -> (u32, usize) {
         let page = slot / Self::SLOTS_PER_PAGE;
         let page = page % pages;
-        let offset = (slot % Self::SLOTS_PER_PAGE) * Tombstone::serialized_len();
+        let offset = (slot % Self::SLOTS_PER_PAGE) * Tombstone::SERIALIZED_LEN;
         (page as u32, offset)
     }
 
@@ -151,7 +149,7 @@ impl TombstoneLog {
                 inner.buffer.load(page).await?;
             }
             let start = offset;
-            let end = start + Tombstone::serialized_len();
+            let end = start + Tombstone::SERIALIZED_LEN;
             tombstone.write(&mut inner.buffer.as_mut()[start..end]);
 
             inner.slot += 1;
@@ -234,7 +232,7 @@ impl PageBuffer {
         let mut partition = 0;
 
         loop {
-            let partition_pages = self.partitions[partition].size() as u32 / PAGE as u32;
+            let partition_pages = (self.partitions[partition].size() / PAGE) as u32;
             if page < partition_pages {
                 break (partition, PAGE as u64 * page as u64);
             }
@@ -312,6 +310,33 @@ mod tests {
             assert_eq!(inner.slot, (3 * 1024 + 42 + 1) % (TombstoneLog::SLOTS_PER_PAGE * 4));
             let (page, _) = log.slot_addr(inner.slot);
             assert_eq!(inner.buffer.page, page);
+        }
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test_log::test(tokio::test)]
+    async fn test_page_buffer_locate_large_partitions() {
+        use crate::io::{device::noop::NoopDeviceBuilder, engine::noop::NoopIoEngine};
+
+        let gib = 1024usize * 1024 * 1024;
+        // Mock devices exercise large partition sizes without allocating their backing storage.
+        for size in [4 * gib - PAGE, 4 * gib, 4 * gib + PAGE, 6 * gib, 8 * gib] {
+            let device = NoopDeviceBuilder::new(size + 2 * PAGE).build().unwrap();
+            let partitions = vec![
+                device.create_partition(size).unwrap(),
+                device.create_partition(2 * PAGE).unwrap(),
+            ];
+            let buffer = PageBuffer::open(Arc::new(NoopIoEngine), partitions, 0).await.unwrap();
+            let pages = (size / PAGE) as u32;
+
+            assert_eq!(buffer.locate(0), (0, 0), "partition size: {size}");
+            assert_eq!(
+                buffer.locate(pages - 1),
+                (0, (size - PAGE) as u64),
+                "partition size: {size}"
+            );
+            assert_eq!(buffer.locate(pages), (1, 0), "partition size: {size}");
+            assert_eq!(buffer.locate(pages + 1), (1, PAGE as u64), "partition size: {size}");
         }
     }
 }

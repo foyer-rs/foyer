@@ -38,18 +38,23 @@ strict_assertions = [
   "foyer-memory/strict_assertions",
   "foyer-storage/strict_assertions",
 ]
-runtime-tokio = ["tokio/runtime-tokio"]
-runtime-madsim-tokio = ["tokio/runtime-madsim-tokio"]
+opendal = ["dep:foyer-opendal"]
+runtime-tokio = ["tokio/runtime-tokio", "foyer-opendal?/runtime-tokio"]
+runtime-madsim-tokio = [
+  "tokio/runtime-madsim-tokio",
+  "foyer-opendal?/runtime-madsim-tokio",
+]
 
 [dependencies]
 anyhow = { workspace = true }
+asyncband = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true, optional = true }
 foyer-common = { workspace = true }
 foyer-memory = { workspace = true }
+foyer-opendal = { workspace = true, optional = true }
 foyer-storage = { workspace = true }
 futures-util = { workspace = true }
-mea = { workspace = true }
 mixtrics = { workspace = true }
 pin-project = { workspace = true }
 serde = { workspace = true }

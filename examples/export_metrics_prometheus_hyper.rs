@@ -106,7 +106,7 @@ async fn main() {
         .with_metrics_registry(Box::new(PrometheusMetricsRegistry::new(registry)))
         .build();
 
-    // > curl http://127.0.0.1:7890
+    // > curl http://127.0.0.1:19970
     //
     // # HELP foyer_hybrid_op_duration foyer hybrid cache operation durations
     // # TYPE foyer_hybrid_op_duration histogram

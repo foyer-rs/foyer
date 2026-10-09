@@ -18,7 +18,7 @@ use equivalent::Equivalent;
 use foyer_common::strict_assert;
 
 use super::Indexer;
-use crate::{eviction::Eviction, record::Record};
+use crate::{eviction::Eviction, indexer::hash_table::HashTableIndexer, record::Record};
 
 /// [`Sentry`] is a guard for all [`Indexer`] implementations to set `IN_INDEXER` flag properly.
 pub struct Sentry<I>
@@ -34,6 +34,21 @@ where
 {
     fn default() -> Self {
         Self { indexer: I::default() }
+    }
+}
+
+impl<E> Sentry<HashTableIndexer<E>>
+where
+    E: Eviction,
+{
+    pub(crate) fn extract_if<'a, F>(&'a mut self, predicate: F) -> impl Iterator<Item = Arc<Record<E>>> + 'a
+    where
+        F: FnMut(&Arc<Record<E>>) -> bool + 'a,
+    {
+        self.indexer.extract_if(predicate).inspect(|record| {
+            strict_assert!(record.is_in_indexer());
+            record.set_in_indexer(false);
+        })
     }
 }
 

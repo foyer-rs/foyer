@@ -13,10 +13,16 @@ readme.workspace = true
 exclude.workspace = true
 publish = false
 
+# `tonic` is not used directly in example code, but it must be listed as a dep so the `otel` feature
+# can opt into the tonic-backed gRPC transport for `opentelemetry-otlp` (`grpc-tonic`).
+# Tell cargo-machete to ignore it so CI doesn't flag it as unused.
+[package.metadata.cargo-machete]
+ignored = ["tonic"]
+
 [features]
+opendal = ["foyer/opendal", "dep:opendal-core", "dep:opendal-service-fs"]
 serde = ["foyer/serde"]
-jaeger = ["fastrace-jaeger"]
-ot = [
+otel = [
   "fastrace-opentelemetry",
   "opentelemetry",
   "opentelemetry-otlp",
@@ -28,9 +34,10 @@ ot = [
 anyhow = { workspace = true }
 equivalent = { workspace = true }
 fastrace = { workspace = true }
-fastrace-jaeger = { workspace = true, optional = true }
 fastrace-opentelemetry = { workspace = true, optional = true }
 foyer = { workspace = true, features = ["runtime-tokio"] }
+opendal-core = { version = "=0.59.1", default-features = false, optional = true }
+opendal-service-fs = { version = "=0.59.1", optional = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, default-features = false, features = [
   "server",
@@ -55,12 +62,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tonic = { workspace = true, optional = true }
 tracing = { workspace = true }
-
-# `tonic` is not used directly in example code, but it must be listed as a dep so the `ot` feature
-# can opt into the tonic-backed gRPC transport for `opentelemetry-otlp` (`grpc-tonic`).
-# Tell cargo-machete to ignore it so CI doesn't flag it as unused.
-[package.metadata.cargo-machete]
-ignored = ["tonic"]
 
 [[example]]
 name = "memory"
@@ -93,3 +94,8 @@ path = "export_metrics_prometheus_hyper.rs"
 [[example]]
 name = "serde"
 path = "serde.rs"
+
+[[example]]
+name = "opendal"
+path = "opendal.rs"
+required-features = ["opendal"]
