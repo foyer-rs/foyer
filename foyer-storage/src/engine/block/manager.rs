@@ -267,6 +267,9 @@ impl BlockManager {
         std::mem::swap(&mut state.eviction_pickers, &mut pickers);
         assert!(pickers.is_empty());
 
+        // Restore the clean-block reserve a recovered device may lack.
+        self.reclaim_if_needed(&mut state);
+
         let metrics = &self.inner.metrics;
         metrics
             .storage_block_engine_block_clean
@@ -306,6 +309,9 @@ impl BlockManager {
                 } else {
                     let (tx, rx) = oneshot::channel();
                     state.clean_block_waiters.push(tx);
+                    // Nothing else triggers a reclaim while no block is being written, so a waiter
+                    // must start one or it can wait forever (e.g. after recovering with 0 clean blocks).
+                    this.reclaim_if_needed(&mut state);
                     drop(state);
                     rx
                 }
