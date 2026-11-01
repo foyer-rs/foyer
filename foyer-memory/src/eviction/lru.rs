@@ -355,6 +355,68 @@ pub mod tests {
     type TestLru = Lru<u64, u64, TestProperties>;
 
     #[test]
+    fn test_config_update_preserves_priority_on_error() {
+        let mut lru = TestLru::new(
+            4,
+            &LruConfig {
+                high_priority_pool_ratio: 1.0,
+            },
+        )
+        .unwrap();
+        let records = (0..3)
+            .map(|key| {
+                Arc::new(Record::new(Data {
+                    key,
+                    value: key,
+                    properties: TestProperties::default().with_hint(if key == 2 { Hint::Low } else { Hint::Normal }),
+                    hash: key,
+                    weight: 1,
+                }))
+            })
+            .collect_vec();
+        for record in &records {
+            lru.push(record.clone());
+        }
+
+        for ratio in [f64::NAN, -0.1, 1.1] {
+            let error = lru
+                .update(
+                    1,
+                    Some(&LruConfig {
+                        high_priority_pool_ratio: ratio,
+                    }),
+                )
+                .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::Config);
+            assert_eq!(lru.config.high_priority_pool_ratio, 1.0);
+            assert_eq!(lru.high_priority_weight_capacity, 4);
+            assert_ptr_vec_vec_eq(
+                lru.dump(),
+                vec![vec![records[2].clone()], records[..2].to_vec(), vec![]],
+            );
+        }
+
+        lru.update(
+            4,
+            Some(&LruConfig {
+                high_priority_pool_ratio: 0.25,
+            }),
+        )
+        .unwrap();
+        assert_ptr_vec_vec_eq(
+            lru.dump(),
+            vec![
+                vec![records[2].clone(), records[0].clone()],
+                vec![records[1].clone()],
+                vec![],
+            ],
+        );
+        for index in [2, 0, 1] {
+            assert_ptr_eq(&lru.pop().unwrap(), &records[index]);
+        }
+    }
+
+    #[test]
     fn test_lru() {
         let rs = (0..20)
             .map(|i| {
