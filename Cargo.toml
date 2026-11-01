@@ -44,7 +44,7 @@ console-subscriber = "0.5"
 core_affinity = "0.8"
 criterion = "0.8.2"
 csv = "1"
-datasketches = { version = "0.3.0", default-features = false }
+datasketches = { version = "0.6.0", default-features = false }
 equivalent = "1"
 fastant = { version = "0.1.11" }
 fastrace = { version = "0.7.18" }
