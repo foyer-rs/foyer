@@ -124,8 +124,7 @@ async fn test_direct_fs_store() {
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())
-        .build()
-        .unwrap();
+        .build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>, ModHasher, TestProperties>| basic(memory, tempdir.path(), &r);
     test_store(memory, builder, recorder).await;
@@ -138,8 +137,7 @@ async fn test_direct_fs_store_zstd() {
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())
-        .build()
-        .unwrap();
+        .build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>, ModHasher, TestProperties>| {
         basic(memory, tempdir.path(), &r).with_compression(Compression::Zstd)
@@ -154,8 +152,7 @@ async fn test_direct_fs_store_lz4() {
     let memory = CacheBuilder::new(1)
         .with_eviction_config(FifoConfig::default())
         .with_hash_builder(ModHasher::default())
-        .build()
-        .unwrap();
+        .build();
     let r = recorder.clone();
     let builder = |memory: &Cache<u64, Vec<u8>, ModHasher, TestProperties>| {
         basic(memory, tempdir.path(), &r).with_compression(Compression::Lz4)

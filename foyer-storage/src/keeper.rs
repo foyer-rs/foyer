@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_keeper_registration_lifecycle() {
-        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build().unwrap();
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
         let keeper = Keeper::new(1);
 
         // Replacing a value: dropping the old reference must preserve the new value.

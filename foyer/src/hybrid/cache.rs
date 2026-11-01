@@ -1088,7 +1088,6 @@ mod tests {
             .with_hash_builder(ModHasher::default())
             // TODO(MrCroxx): Test with `Engine::Mixed`.
             .storage()
-            .unwrap()
             .with_io_engine_config(PsyncIoEngineConfig::new())
             .with_engine_config(block_engine_builder)
             .build()
@@ -1098,13 +1097,7 @@ mod tests {
 
     #[test_log::test(tokio::test)]
     async fn test_is_hybrid_in_memory() {
-        let hybrid: HybridCache<u64, u64> = HybridCacheBuilder::new()
-            .memory(MB)
-            .storage()
-            .unwrap()
-            .build()
-            .await
-            .unwrap();
+        let hybrid: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
 
         assert!(hybrid.storage().device().is_none());
         assert!(!hybrid.storage().is_enabled());
@@ -1536,7 +1529,6 @@ mod tests {
                 .with_policy(HybridCachePolicy::WriteOnInsertion)
                 .memory(4 * MB)
                 .storage()
-                .unwrap()
                 .with_io_engine_config(PsyncIoEngineConfig::new())
                 .with_engine_config(
                     BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(16 * MB).build().unwrap())
@@ -1693,7 +1685,6 @@ mod tests {
             .with_name("test")
             .memory(100)
             .storage()
-            .unwrap()
             .build()
             .await
             .unwrap();

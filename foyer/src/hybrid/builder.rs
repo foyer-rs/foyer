@@ -223,20 +223,16 @@ where
         }
     }
 
-    /// Build the in-memory cache and continue to modify the disk cache configurations.
-    ///
-    /// # Errors
-    ///
-    /// Returns a configuration error if the shard count is zero or the eviction configuration is invalid.
-    pub fn storage(self) -> Result<HybridCacheBuilderPhaseStorage<K, V, S>> {
-        let memory = self.builder.build()?;
-        Ok(HybridCacheBuilderPhaseStorage {
+    /// Continue to modify the disk cache configurations.
+    pub fn storage(self) -> HybridCacheBuilderPhaseStorage<K, V, S> {
+        let memory = self.builder.build();
+        HybridCacheBuilderPhaseStorage {
             name: self.name.clone(),
             options: self.options,
             metrics: self.metrics.clone(),
             memory: memory.clone(),
             builder: StoreBuilder::new(self.name, memory, self.metrics),
-        })
+        }
     }
 }
 
@@ -356,33 +352,5 @@ where
         };
 
         Ok(HybridCache::new(self.name, self.options, memory, storage, self.metrics))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use foyer_common::error::ErrorKind;
-    use foyer_memory::LfuConfig;
-
-    use super::*;
-
-    #[test]
-    fn test_invalid_memory_configuration() {
-        let result = HybridCacheBuilder::<u64, u64>::new()
-            .memory(16)
-            .with_shards(0)
-            .storage();
-        assert_eq!(result.err().unwrap().kind(), ErrorKind::Config);
-
-        let result = HybridCacheBuilder::<u64, u64>::new()
-            .memory(16)
-            .with_eviction_config(LfuConfig {
-                cmsketch_eps: 0.0,
-                ..Default::default()
-            })
-            .storage();
-        let error = result.err().unwrap();
-        assert_eq!(error.kind(), ErrorKind::Config);
-        assert!(error.to_string().contains("cmsketch_eps"));
     }
 }

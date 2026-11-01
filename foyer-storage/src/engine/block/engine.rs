@@ -888,7 +888,6 @@ mod tests {
             .with_eviction_config(FifoConfig::default())
             .with_hash_builder(ModHasher::default())
             .build()
-            .unwrap()
     }
 
     /// 4 files, fifo eviction, 16 KiB block, 64 KiB capacity.

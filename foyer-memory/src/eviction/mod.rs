@@ -98,9 +98,7 @@ pub trait Eviction: Send + Sync + 'static + Sized {
     type State: State;
 
     /// Create a new cache eviction algorithm instance with the given arguments.
-    ///
-    /// Return a configuration error if the arguments are invalid.
-    fn new(capacity: usize, config: &Self::Config) -> Result<Self>;
+    fn new(capacity: usize, config: &Self::Config) -> Self;
 
     /// Update the arguments of the ache eviction algorithm instance.
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()>;

@@ -469,7 +469,7 @@ where
     }
 
     /// Set in-memory cache sharding count. Entries will be distributed to different shards based on their hash.
-    /// Operations on different shard can be parallelized. The count must be greater than zero.
+    /// Operations on different shard can be parallelized.
     pub fn with_shards(mut self, shards: usize) -> Self {
         self.shards = shards;
         self
@@ -547,11 +547,7 @@ where
     }
 
     /// Build in-memory cache with the given configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns a configuration error if the shard count is zero or the eviction configuration is invalid.
-    pub fn build<P>(self) -> Result<Cache<K, V, S, P>>
+    pub fn build<P>(self) -> Cache<K, V, S, P>
     where
         P: Properties,
     {
@@ -567,7 +563,7 @@ where
             .metrics
             .unwrap_or_else(|| Arc::new(Metrics::new(self.name, &self.registry)));
 
-        Ok(match self.eviction_config {
+        match self.eviction_config {
             EvictionConfig::Fifo(eviction_config) => Cache::Fifo(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
@@ -577,7 +573,7 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            })?),
+            })),
             EvictionConfig::S3Fifo(eviction_config) => Cache::S3Fifo(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
@@ -587,7 +583,7 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            })?),
+            })),
             EvictionConfig::Lru(eviction_config) => Cache::Lru(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
@@ -597,7 +593,7 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            })?),
+            })),
             EvictionConfig::Lfu(eviction_config) => Cache::Lfu(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
@@ -607,7 +603,7 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            })?),
+            })),
             EvictionConfig::Sieve(eviction_config) => Cache::Sieve(RawCache::new(RawCacheConfig {
                 capacity: self.capacity,
                 shards: self.shards,
@@ -617,8 +613,8 @@ where
                 filter: self.filter,
                 event_listener: self.event_listener,
                 metrics,
-            })?),
-        })
+            })),
+        }
     }
 }
 
@@ -1186,154 +1182,11 @@ mod tests {
     const OPS: usize = 10000;
     const CONCURRENCY: usize = 8;
 
-    fn assert_invalid_config(config: impl Into<EvictionConfig>, field: &str) {
-        let error = CacheBuilder::<u64, u64, DefaultHasher>::new(16)
-            .with_shards(1)
-            .with_eviction_config(config)
-            .build::<CacheProperties>()
-            .unwrap_err();
-        assert_eq!(error.kind(), foyer_common::error::ErrorKind::Config);
-        assert!(error.to_string().contains(field), "{error}");
-    }
-
-    #[test]
-    fn test_invalid_cache_configuration() {
-        let error = CacheBuilder::<u64, u64, DefaultHasher>::new(16)
-            .with_shards(0)
-            .build::<CacheProperties>()
-            .unwrap_err();
-        assert_eq!(error.kind(), foyer_common::error::ErrorKind::Config);
-
-        for ratio in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
-            assert_invalid_config(
-                LruConfig {
-                    high_priority_pool_ratio: ratio,
-                },
-                "high_priority_pool_ratio",
-            );
-        }
-        for ratio in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 0.0, 1.0] {
-            assert_invalid_config(
-                LfuConfig {
-                    window_capacity_ratio: ratio,
-                    ..Default::default()
-                },
-                "window_capacity_ratio",
-            );
-            assert_invalid_config(
-                LfuConfig {
-                    protected_capacity_ratio: ratio,
-                    ..Default::default()
-                },
-                "protected_capacity_ratio",
-            );
-            assert_invalid_config(
-                S3FifoConfig {
-                    small_queue_capacity_ratio: ratio,
-                    ..Default::default()
-                },
-                "small_queue_capacity_ratio",
-            );
-        }
-        for ratio in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1] {
-            assert_invalid_config(
-                S3FifoConfig {
-                    ghost_queue_capacity_ratio: ratio,
-                    ..Default::default()
-                },
-                "ghost_queue_capacity_ratio",
-            );
-        }
-        assert_invalid_config(
-            LfuConfig {
-                window_capacity_ratio: 0.5,
-                protected_capacity_ratio: 0.5,
-                ..Default::default()
-            },
-            "window_capacity_ratio + protected_capacity_ratio",
-        );
-        for eps in [f64::NAN, f64::INFINITY, -1.0, 0.0, f64::MIN_POSITIVE] {
-            assert_invalid_config(
-                LfuConfig {
-                    cmsketch_eps: eps,
-                    ..Default::default()
-                },
-                "cmsketch_eps",
-            );
-        }
-        for confidence in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
-            assert_invalid_config(
-                LfuConfig {
-                    cmsketch_confidence: confidence,
-                    ..Default::default()
-                },
-                "cmsketch_confidence",
-            );
-        }
-    }
-
-    #[test]
-    fn test_lfu_rejects_oversized_sketch() {
-        // Each dimension is supported, but their product exceeds the sketch's table limit.
-        let config = LfuConfig {
-            cmsketch_eps: 1e-7,
-            cmsketch_confidence: 1.0,
-            ..Default::default()
-        };
-        assert!(datasketches::countmin::CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps).is_ok());
-        assert!(datasketches::countmin::CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence).is_ok());
-        let error = CacheBuilder::<u64, u64, DefaultHasher>::new(16)
-            .with_shards(1)
-            .with_eviction_config(config)
-            .build::<CacheProperties>()
-            .unwrap_err();
-        assert_eq!(error.kind(), foyer_common::error::ErrorKind::Config);
-        assert!(error.to_string().contains("num_hashes"));
-        assert!(std::error::Error::source(&error).is_some());
-    }
-
-    #[test]
-    fn test_cache_configuration_boundaries() {
-        for config in [
-            EvictionConfig::from(LruConfig {
-                high_priority_pool_ratio: 0.0,
-            }),
-            EvictionConfig::from(LruConfig {
-                high_priority_pool_ratio: 1.0,
-            }),
-            EvictionConfig::from(LfuConfig {
-                cmsketch_confidence: 0.0,
-                ..Default::default()
-            }),
-            EvictionConfig::from(LfuConfig {
-                cmsketch_confidence: 1.0,
-                ..Default::default()
-            }),
-            EvictionConfig::from(S3FifoConfig {
-                ghost_queue_capacity_ratio: 0.0,
-                ..Default::default()
-            }),
-            EvictionConfig::from(S3FifoConfig {
-                ghost_queue_capacity_ratio: 10.0,
-                ..Default::default()
-            }),
-        ] {
-            let cache: Cache<u64, u64> = CacheBuilder::new(0)
-                .with_shards(1)
-                .with_eviction_config(config)
-                .build()
-                .unwrap();
-            assert_eq!(cache.capacity(), 0);
-            assert_eq!(*cache.insert(1, 2).value(), 2);
-        }
-    }
-
     fn fifo() -> Cache<u64, u64> {
         CacheBuilder::new(CAPACITY)
             .with_shards(SHARDS)
             .with_eviction_config(FifoConfig {})
             .build()
-            .unwrap()
     }
 
     fn lru() -> Cache<u64, u64> {
@@ -1343,7 +1196,6 @@ mod tests {
                 high_priority_pool_ratio: 0.1,
             })
             .build()
-            .unwrap()
     }
 
     fn lfu() -> Cache<u64, u64> {
@@ -1356,7 +1208,6 @@ mod tests {
                 cmsketch_confidence: 0.9,
             })
             .build()
-            .unwrap()
     }
 
     fn s3fifo() -> Cache<u64, u64> {
@@ -1368,7 +1219,6 @@ mod tests {
                 small_to_main_freq_threshold: 2,
             })
             .build()
-            .unwrap()
     }
 
     fn sieve() -> Cache<u64, u64> {
@@ -1376,7 +1226,6 @@ mod tests {
             .with_shards(SHARDS)
             .with_eviction_config(SieveConfig {})
             .build()
-            .unwrap()
     }
 
     fn init_cache(cache: &Cache<u64, u64>, rng: &mut StdRng) {
@@ -1443,7 +1292,7 @@ mod tests {
     #[test]
     fn test_reinsert_resident_piece() {
         for pin in [false, true] {
-            let cache: Cache<u64, u64> = CacheBuilder::new(2).with_shards(1).build().unwrap();
+            let cache: Cache<u64, u64> = CacheBuilder::new(2).with_shards(1).build();
             let entry = cache.insert(1, 1);
             drop(cache.insert(2, 2));
             let pinned = pin.then(|| cache.get(&1).unwrap());

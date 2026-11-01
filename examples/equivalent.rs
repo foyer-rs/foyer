@@ -30,7 +30,7 @@ where
 }
 
 fn main() {
-    let cache: Cache<(String, String), String> = CacheBuilder::new(16).build().unwrap();
+    let cache: Cache<(String, String), String> = CacheBuilder::new(16).build();
 
     let entry = cache.insert(
         ("hello".to_string(), "world".to_string()),

@@ -34,20 +34,10 @@ pub struct LruConfig {
     /// `Lru` guarantees that the high priority weight are always as larger as
     /// but no larger that the capacity * high priority pool ratio.
     ///
-    /// Must be in [0, 1].
+    /// # Panic
+    ///
+    /// Panics if the value is not in [0, 1.0].
     pub high_priority_pool_ratio: f64,
-}
-
-impl LruConfig {
-    fn validate(&self) -> Result<()> {
-        if !(0.0..=1.0).contains(&self.high_priority_pool_ratio) {
-            return Err(
-                Error::new(ErrorKind::Config, "high_priority_pool_ratio must be in [0, 1]")
-                    .with_context("high_priority_pool_ratio", self.high_priority_pool_ratio),
-            );
-        }
-        Ok(())
-    }
 }
 
 impl Default for LruConfig {
@@ -118,29 +108,41 @@ where
     type Properties = P;
     type State = LruState;
 
-    fn new(capacity: usize, config: &Self::Config) -> Result<Self>
+    fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
-        config.validate()?;
+        assert!(
+            (0.0..=1.0).contains(&config.high_priority_pool_ratio),
+            "high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}",
+            config.high_priority_pool_ratio
+        );
 
         let config = config.clone();
 
         let high_priority_weight_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
 
-        Ok(Self {
+        Self {
             high_priority_list: LinkedList::new(Adapter::new()),
             list: LinkedList::new(Adapter::new()),
             pin_list: LinkedList::new(Adapter::new()),
             high_priority_weight: 0,
             high_priority_weight_capacity,
             config,
-        })
+        }
     }
 
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
-            config.validate()?;
+            if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
+                return Err(
+                    Error::new(ErrorKind::Config, "update LRU config failed")
+                        .with_context("reason", format!(
+                            "high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
+                            config.high_priority_pool_ratio
+                        ))
+                );
+            }
             self.config = config.clone();
         }
 
@@ -355,68 +357,6 @@ pub mod tests {
     type TestLru = Lru<u64, u64, TestProperties>;
 
     #[test]
-    fn test_config_update_preserves_priority_on_error() {
-        let mut lru = TestLru::new(
-            4,
-            &LruConfig {
-                high_priority_pool_ratio: 1.0,
-            },
-        )
-        .unwrap();
-        let records = (0..3)
-            .map(|key| {
-                Arc::new(Record::new(Data {
-                    key,
-                    value: key,
-                    properties: TestProperties::default().with_hint(if key == 2 { Hint::Low } else { Hint::Normal }),
-                    hash: key,
-                    weight: 1,
-                }))
-            })
-            .collect_vec();
-        for record in &records {
-            lru.push(record.clone());
-        }
-
-        for ratio in [f64::NAN, -0.1, 1.1] {
-            let error = lru
-                .update(
-                    1,
-                    Some(&LruConfig {
-                        high_priority_pool_ratio: ratio,
-                    }),
-                )
-                .unwrap_err();
-            assert_eq!(error.kind(), ErrorKind::Config);
-            assert_eq!(lru.config.high_priority_pool_ratio, 1.0);
-            assert_eq!(lru.high_priority_weight_capacity, 4);
-            assert_ptr_vec_vec_eq(
-                lru.dump(),
-                vec![vec![records[2].clone()], records[..2].to_vec(), vec![]],
-            );
-        }
-
-        lru.update(
-            4,
-            Some(&LruConfig {
-                high_priority_pool_ratio: 0.25,
-            }),
-        )
-        .unwrap();
-        assert_ptr_vec_vec_eq(
-            lru.dump(),
-            vec![
-                vec![records[2].clone(), records[0].clone()],
-                vec![records[1].clone()],
-                vec![],
-            ],
-        );
-        for index in [2, 0, 1] {
-            assert_ptr_eq(&lru.pop().unwrap(), &records[index]);
-        }
-    }
-
-    #[test]
     fn test_lru() {
         let rs = (0..20)
             .map(|i| {
@@ -438,7 +378,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config).unwrap();
+        let mut lru = TestLru::new(8, &config);
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 
@@ -514,7 +454,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config).unwrap();
+        let mut lru = TestLru::new(8, &config);
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 
@@ -598,7 +538,7 @@ pub mod tests {
                         hash: 0,
                         weight: 1,
                     }));
-                    let mut lru = TestLru::new(10, &LruConfig::default()).unwrap();
+                    let mut lru = TestLru::new(10, &LruConfig::default());
                     lru.push(record.clone());
                     lru.acquire_mutable(&record);
                     if clear {
@@ -642,7 +582,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 1.0,
         };
-        let mut lru = TestLru::new(1, &config).unwrap();
+        let mut lru = TestLru::new(1, &config);
 
         lru.push(record.clone());
         lru.acquire_mutable(&record);

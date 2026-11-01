@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
         .with_filter(|_, _| true)
-        .storage()?
+        .storage()
         .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
             BlockEngineConfig::new(device)

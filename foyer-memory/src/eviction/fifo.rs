@@ -58,13 +58,13 @@ where
     type Properties = P;
     type State = FifoState;
 
-    fn new(_capacity: usize, _config: &Self::Config) -> Result<Self>
+    fn new(_capacity: usize, _config: &Self::Config) -> Self
     where
         Self: Sized,
     {
-        Ok(Self {
+        Self {
             queue: LinkedList::new(Adapter::new()),
-        })
+        }
     }
 
     fn update(&mut self, _: usize, _: Option<&Self::Config>) -> Result<()> {
@@ -142,7 +142,7 @@ pub mod tests {
             .collect_vec();
         let r = |i: usize| rs[i].clone();
 
-        let mut fifo = TestFifo::new(100, &FifoConfig {}).unwrap();
+        let mut fifo = TestFifo::new(100, &FifoConfig {});
 
         // 0, 1, 2, 3
         fifo.push(r(0));

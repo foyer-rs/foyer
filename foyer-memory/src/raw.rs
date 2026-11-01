@@ -491,10 +491,8 @@ where
     S: HashBuilder,
     I: Indexer<Eviction = E>,
 {
-    pub fn new(config: RawCacheConfig<E, S>) -> Result<Self> {
-        if config.shards == 0 {
-            return Err(Error::new(ErrorKind::Config, "shards must be greater than zero"));
-        }
+    pub fn new(config: RawCacheConfig<E, S>) -> Self {
+        assert!(config.shards > 0, "shards must be greater than zero.");
 
         let shard_capacities = (0..config.shards)
             .map(|index| Self::shard_capacity_for(config.capacity, config.shards, index))
@@ -502,21 +500,20 @@ where
 
         let shards = shard_capacities
             .into_iter()
-            .map(|shard_capacity| {
-                Ok(RwLock::new(RawCacheShard {
-                    eviction: E::new(shard_capacity, &config.eviction_config)?,
-                    indexer: Sentry::default(),
-                    usage: 0,
-                    entries: 0,
-                    capacity: shard_capacity,
-                    inflights: Arc::new(Mutex::new(InflightManager::new())),
-                    metrics: config.metrics.clone(),
-                    _event_listener: config.event_listener.clone(),
-                }))
+            .map(|shard_capacity| RawCacheShard {
+                eviction: E::new(shard_capacity, &config.eviction_config),
+                indexer: Sentry::default(),
+                usage: 0,
+                entries: 0,
+                capacity: shard_capacity,
+                inflights: Arc::new(Mutex::new(InflightManager::new())),
+                metrics: config.metrics.clone(),
+                _event_listener: config.event_listener.clone(),
             })
-            .collect::<Result<Vec<_>>>()?;
+            .map(RwLock::new)
+            .collect_vec();
 
-        Ok(Self {
+        Self {
             pipe: Arc::new(NoopPipe::default()),
             inner: Arc::new(RawCacheInner {
                 shards,
@@ -527,7 +524,7 @@ where
                 metrics: config.metrics,
                 event_listener: config.event_listener,
             }),
-        })
+        }
     }
 
     #[cfg_attr(feature = "tracing", fastrace::trace(name = "foyer::memory::raw::resize"))]
@@ -1593,7 +1590,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-        .unwrap()
     }
 
     #[expect(clippy::type_complexity)]
@@ -1609,7 +1605,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-        .unwrap()
     }
 
     #[expect(clippy::type_complexity)]
@@ -1625,7 +1620,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-        .unwrap()
     }
 
     #[expect(clippy::type_complexity)]
@@ -1641,7 +1635,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-        .unwrap()
     }
 
     #[expect(clippy::type_complexity)]
@@ -1657,7 +1650,6 @@ mod tests {
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
         })
-        .unwrap()
     }
 
     #[test_log::test]
@@ -1703,8 +1695,7 @@ mod tests {
             filter: Arc::new(|k, _| !matches!(*k, 42)),
             event_listener: None,
             metrics: Arc::new(Metrics::noop()),
-        })
-        .unwrap();
+        });
 
         fifo.insert(1, 1);
         fifo.insert(2, 2);
@@ -1788,12 +1779,11 @@ mod tests {
                 shards: 1,
                 eviction_config: FifoConfig::default(),
                 hash_builder: Default::default(),
-                weighter: Arc::new(|k: &Vec<u8>, v: &Vec<u8>| k.len() + v.len()),
+                weighter: Arc::new(|k, v| k.len() + v.len()),
                 filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
-            })
-            .unwrap();
+            });
 
         let key = vec![b'k'; 1024]; // 1KB
         let value = vec![b'v'; 5 * 1024]; // 5KB
@@ -1815,8 +1805,7 @@ mod tests {
                 filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
-            })
-            .unwrap();
+            });
 
         for key in 0..3 {
             let entry = cache.insert(key, key);
@@ -1844,8 +1833,7 @@ mod tests {
                 filter: Arc::new(|_, _| true),
                 event_listener: None,
                 metrics: Arc::new(Metrics::noop()),
-            })
-            .unwrap();
+            });
 
         for key in 0..2 {
             let entry = cache.insert(key, key);
@@ -2026,8 +2014,7 @@ mod tests {
                     filter: Arc::new(|_, _| true),
                     event_listener: None,
                     metrics: Arc::new(Metrics::noop()),
-                })
-                .unwrap();
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
@@ -2044,8 +2031,7 @@ mod tests {
                     filter: Arc::new(|_, _| true),
                     event_listener: None,
                     metrics: Arc::new(Metrics::noop()),
-                })
-                .unwrap();
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
@@ -2062,8 +2048,7 @@ mod tests {
                     filter: Arc::new(|_, _| true),
                     event_listener: None,
                     metrics: Arc::new(Metrics::noop()),
-                })
-                .unwrap();
+                });
             let hints = vec![Hint::Normal, Hint::Low];
             fuzzy(cache, hints);
         }
@@ -2080,8 +2065,7 @@ mod tests {
                     filter: Arc::new(|_, _| true),
                     event_listener: None,
                     metrics: Arc::new(Metrics::noop()),
-                })
-                .unwrap();
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }
@@ -2098,8 +2082,7 @@ mod tests {
                     filter: Arc::new(|_, _| true),
                     event_listener: None,
                     metrics: Arc::new(Metrics::noop()),
-                })
-                .unwrap();
+                });
             let hints = vec![Hint::Normal];
             fuzzy(cache, hints);
         }

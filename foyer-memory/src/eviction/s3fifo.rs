@@ -36,31 +36,12 @@ use crate::record::Record;
 /// S3Fifo eviction algorithm config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct S3FifoConfig {
-    /// Capacity ratio of the small S3FIFO queue. Must be in (0, 1).
+    /// Capacity ratio of the small S3FIFO queue.
     pub small_queue_capacity_ratio: f64,
-    /// Capacity ratio of the ghost S3FIFO queue. Must be finite and nonnegative.
+    /// Capacity ratio of the ghost S3FIFO queue.
     pub ghost_queue_capacity_ratio: f64,
     /// Minimum access times when population entry from small queue to main queue.
     pub small_to_main_freq_threshold: u8,
-}
-
-impl S3FifoConfig {
-    fn validate(&self) -> Result<()> {
-        if !(self.small_queue_capacity_ratio > 0.0 && self.small_queue_capacity_ratio < 1.0) {
-            return Err(
-                Error::new(ErrorKind::Config, "small_queue_capacity_ratio must be in (0, 1)")
-                    .with_context("small_queue_capacity_ratio", self.small_queue_capacity_ratio),
-            );
-        }
-        if !self.ghost_queue_capacity_ratio.is_finite() || self.ghost_queue_capacity_ratio < 0.0 {
-            return Err(Error::new(
-                ErrorKind::Config,
-                "ghost_queue_capacity_ratio must be finite and nonnegative",
-            )
-            .with_context("ghost_queue_capacity_ratio", self.ghost_queue_capacity_ratio));
-        }
-        Ok(())
-    }
 }
 
 impl Default for S3FifoConfig {
@@ -216,11 +197,15 @@ where
     type Properties = P;
     type State = S3FifoState;
 
-    fn new(capacity: usize, config: &Self::Config) -> Result<Self>
+    fn new(capacity: usize, config: &Self::Config) -> Self
     where
         Self: Sized,
     {
-        config.validate()?;
+        assert!(
+            config.small_queue_capacity_ratio > 0.0 && config.small_queue_capacity_ratio < 1.0,
+            "small_queue_capacity_ratio must be in (0, 1), given: {}",
+            config.small_queue_capacity_ratio
+        );
 
         let config = config.clone();
 
@@ -228,7 +213,7 @@ where
         let ghost_queue = GhostQueue::new(ghost_queue_capacity);
         let small_weight_capacity = (capacity as f64 * config.small_queue_capacity_ratio) as usize;
 
-        Ok(Self {
+        Self {
             ghost_queue,
             small_queue: LinkedList::new(Adapter::new()),
             main_queue: LinkedList::new(Adapter::new()),
@@ -237,12 +222,22 @@ where
             main_weight: 0,
             small_to_main_freq_threshold: config.small_to_main_freq_threshold.min(S3FifoState::MAX_FREQUENCY),
             config,
-        })
+        }
     }
 
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
-            config.validate()?;
+            if config.small_queue_capacity_ratio > 0.0 && config.small_queue_capacity_ratio < 1.0 {
+                return Err(
+                    Error::new(ErrorKind::Config, "update S3-FIFO config failed").with_context(
+                        "reason",
+                        format!(
+                            "small_queue_capacity_ratio must be in (0, 1), given: {}",
+                            config.small_queue_capacity_ratio
+                        ),
+                    ),
+                );
+            }
             self.config = config.clone();
         }
 
@@ -429,39 +424,6 @@ mod tests {
     }
 
     #[test]
-    fn test_update_configuration_validation() {
-        let mut s3fifo = TestS3Fifo::new(10, &S3FifoConfig::default()).unwrap();
-        s3fifo
-            .update(
-                20,
-                Some(&S3FifoConfig {
-                    small_queue_capacity_ratio: 0.5,
-                    ..Default::default()
-                }),
-            )
-            .unwrap();
-        assert_eq!(s3fifo.small_weight_capacity, 10);
-        for config in [
-            S3FifoConfig {
-                small_queue_capacity_ratio: 0.0,
-                ..Default::default()
-            },
-            S3FifoConfig {
-                small_queue_capacity_ratio: f64::NAN,
-                ..Default::default()
-            },
-            S3FifoConfig {
-                ghost_queue_capacity_ratio: -1.0,
-                ..Default::default()
-            },
-        ] {
-            assert_eq!(s3fifo.update(100, Some(&config)).unwrap_err().kind(), ErrorKind::Config);
-            assert_eq!(s3fifo.config.small_queue_capacity_ratio, 0.5);
-            assert_eq!(s3fifo.small_weight_capacity, 10);
-        }
-    }
-
-    #[test]
     fn test_s3fifo() {
         let rs = (0..100)
             .map(|i| {
@@ -482,7 +444,7 @@ mod tests {
             ghost_queue_capacity_ratio: 10.0,
             small_to_main_freq_threshold: 2,
         };
-        let mut s3fifo = TestS3Fifo::new(8, &config).unwrap();
+        let mut s3fifo = TestS3Fifo::new(8, &config);
 
         assert_eq!(s3fifo.small_weight_capacity, 2);
 

@@ -147,7 +147,7 @@ async fn build(config: impl Into<Box<dyn EngineConfig<String, Vec<u8>, Props>>>)
         .memory(1 << 20)
         .with_shards(1)
         .with_weighter(|k: &String, v: &Vec<u8>| k.len() + v.len())
-        .storage()?
+        .storage()
         .with_recover_mode(RecoverMode::None)
         .with_io_engine_config(ProbeIoConfig {
             calls: calls.clone(),
@@ -707,7 +707,7 @@ async fn memory_only_does_not_construct_block_io() -> Result<()> {
     let calls = Arc::new(AtomicU64::new(0));
     let cache: Cache = HybridCacheBuilder::new()
         .memory(1 << 20)
-        .storage()?
+        .storage()
         .with_io_engine_config(ProbeIoConfig {
             calls: calls.clone(),
             fail: true,
@@ -735,7 +735,7 @@ async fn block_engine_builds_config_and_preserves_device_statistics() -> Result<
     let cache: Cache = HybridCacheBuilder::new()
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(1 << 20)
-        .storage()?
+        .storage()
         .with_io_engine_config(ProbeIoConfig {
             calls: calls.clone(),
             fail: false,
@@ -756,7 +756,7 @@ async fn block_engine_builds_config_and_preserves_device_statistics() -> Result<
     cache.close().await?;
     let failed: foyer::Result<Cache> = HybridCacheBuilder::new()
         .memory(1 << 20)
-        .storage()?
+        .storage()
         .with_io_engine_config(ProbeIoConfig {
             calls: calls.clone(),
             fail: true,
@@ -779,7 +779,7 @@ async fn opendal_flush_on_close_uses_engine_statistics_without_a_device() -> Res
             .with_policy(HybridCachePolicy::WriteOnEviction)
             .with_flush_on_close(true)
             .memory(1 << 20)
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::None)
             .with_io_engine_config(ProbeIoConfig {
                 calls: calls.clone(),
@@ -841,7 +841,7 @@ async fn public_path_covers_memory_secondary_source_and_eviction_policy() -> Res
             .with_shards(1)
             .with_eviction_config(FifoConfig::default())
             .with_weighter(|k: &String, v: &Vec<u8>| k.len() + v.len())
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::None)
             .with_io_engine_config(ProbeIoConfig {
                 calls: Arc::new(AtomicU64::new(0)),
@@ -1046,7 +1046,7 @@ async fn hash_collision_does_not_return_another_key() -> Result<()> {
             .with_shards(1)
             .with_hash_builder(std::hash::BuildHasherDefault::<CollisionHasher>::default())
             .with_weighter(|k: &String, v: &Vec<u8>| k.len() + v.len())
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::None)
             .with_io_engine_config(ProbeIoConfig {
                 calls: Arc::new(AtomicU64::new(0)),
@@ -1104,7 +1104,7 @@ async fn namespace_isolation_restart_and_unsupported_recovery() -> Result<()> {
         let (config, _fx) = engine_config(kind, "recover-quiet", 1 << 20, 1 << 20)?;
         let failed: foyer::Result<Cache> = HybridCacheBuilder::new()
             .memory(1 << 20)
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::Quiet)
             .with_io_engine_config(ProbeIoConfig {
                 calls: Arc::new(AtomicU64::new(0)),
@@ -1119,7 +1119,7 @@ async fn namespace_isolation_restart_and_unsupported_recovery() -> Result<()> {
         let (_, fx) = engine_config(kind, "bad-ns", 1 << 20, 1 << 20)?;
         let failed: foyer::Result<Cache> = HybridCacheBuilder::new()
             .memory(1 << 20)
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::None)
             .with_io_engine_config(ProbeIoConfig {
                 calls: Arc::new(AtomicU64::new(0)),
@@ -1198,7 +1198,7 @@ async fn max_object_size_defaults_to_capacity_and_can_be_narrowed() -> Result<()
         for bytes in [0, 2048] {
             let failed: foyer::Result<Cache> = HybridCacheBuilder::new()
                 .memory(1 << 20)
-                .storage()?
+                .storage()
                 .with_recover_mode(RecoverMode::None)
                 .with_io_engine_config(ProbeIoConfig {
                     calls: Arc::new(AtomicU64::new(0)),
@@ -1469,7 +1469,7 @@ async fn varied_payloads_round_trip() -> Result<()> {
             .memory(4096)
             .with_shards(1)
             .with_weighter(|k: &String, v: &Vec<u8>| k.len() + v.len())
-            .storage()?
+            .storage()
             .with_recover_mode(RecoverMode::None)
             .with_io_engine_config(ProbeIoConfig {
                 calls: Arc::new(AtomicU64::new(0)),

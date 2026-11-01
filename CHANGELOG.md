@@ -9,18 +9,6 @@ date: 2023-05-12T11:02:09+08:00
 
 <!-- truncate -->
 
-## Unreleased
-
-### Changes
-
-Breaking changes:
-
-- Return configuration errors from `CacheBuilder::build()` and `HybridCacheBuilderPhaseMemory::storage()`. Callers must handle the returned `Result`, for example with `CacheBuilder::new(capacity).build()?` or `HybridCacheBuilder::new().memory(capacity).storage()?.build().await?`. Invalid shard counts, eviction ratios, and LFU sketch parameters return `ErrorKind::Config`.
-
-Fixes:
-
-- Apply the same eviction ratio validation during construction and updates, including non-finite values, and fix S3FIFO rejecting valid small-queue ratios during updates. LFU updates now reject changes to sketch parameters that previously had no effect.
-
 ## 2026-09-09
 
 ### Release

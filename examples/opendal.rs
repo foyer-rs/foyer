@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
         .with_policy(HybridCachePolicy::WriteOnInsertion)
         .memory(8 << 20)
         .with_weighter(|key: &String, value: &Vec<u8>| key.len() + value.len())
-        .storage()?
+        .storage()
         .with_recover_mode(RecoverMode::None)
         .with_engine_config(engine)
         .build()
