@@ -116,6 +116,7 @@ async fn test_concurrent_insert_disk_cache_and_fetch() {
         .memory(MB)
         .with_weighter(|_, v| 8 + v.len())
         .storage()
+        .unwrap()
         .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
             BlockEngineConfig::new(FsDeviceBuilder::new(dir).with_capacity(64 * MB).build().unwrap())

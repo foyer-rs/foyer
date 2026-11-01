@@ -14,11 +14,12 @@
 
 use foyer::{Cache, CacheBuilder};
 
-fn main() {
-    let cache: Cache<String, String> = CacheBuilder::new(16).build();
+fn main() -> anyhow::Result<()> {
+    let cache: Cache<String, String> = CacheBuilder::new(16).build()?;
 
     let entry = cache.insert("hello".to_string(), "world".to_string());
     let e = cache.get("hello").unwrap();
 
     assert_eq!(entry.value(), e.value());
+    Ok(())
 }

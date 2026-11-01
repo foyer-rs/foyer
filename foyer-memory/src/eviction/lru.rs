@@ -34,10 +34,20 @@ pub struct LruConfig {
     /// `Lru` guarantees that the high priority weight are always as larger as
     /// but no larger that the capacity * high priority pool ratio.
     ///
-    /// # Panic
-    ///
-    /// Panics if the value is not in [0, 1.0].
+    /// Must be in [0, 1].
     pub high_priority_pool_ratio: f64,
+}
+
+impl LruConfig {
+    fn validate(&self) -> Result<()> {
+        if !(0.0..=1.0).contains(&self.high_priority_pool_ratio) {
+            return Err(
+                Error::new(ErrorKind::Config, "high_priority_pool_ratio must be in [0, 1]")
+                    .with_context("high_priority_pool_ratio", self.high_priority_pool_ratio),
+            );
+        }
+        Ok(())
+    }
 }
 
 impl Default for LruConfig {
@@ -108,41 +118,29 @@ where
     type Properties = P;
     type State = LruState;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config) -> Result<Self>
     where
         Self: Sized,
     {
-        assert!(
-            (0.0..=1.0).contains(&config.high_priority_pool_ratio),
-            "high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}",
-            config.high_priority_pool_ratio
-        );
+        config.validate()?;
 
         let config = config.clone();
 
         let high_priority_weight_capacity = (capacity as f64 * config.high_priority_pool_ratio) as usize;
 
-        Self {
+        Ok(Self {
             high_priority_list: LinkedList::new(Adapter::new()),
             list: LinkedList::new(Adapter::new()),
             pin_list: LinkedList::new(Adapter::new()),
             high_priority_weight: 0,
             high_priority_weight_capacity,
             config,
-        }
+        })
     }
 
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
-            if !(0.0..=1.0).contains(&config.high_priority_pool_ratio) {
-                return Err(
-                    Error::new(ErrorKind::Config, "update LRU config failed")
-                        .with_context("reason", format!(
-                            "high_priority_pool_ratio_percentage must be in 0.0..=1.0, given: {}, new configuration ignored",
-                            config.high_priority_pool_ratio
-                        ))
-                );
-            }
+            config.validate()?;
             self.config = config.clone();
         }
 
@@ -378,7 +376,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config);
+        let mut lru = TestLru::new(8, &config).unwrap();
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 
@@ -454,7 +452,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 0.5,
         };
-        let mut lru = TestLru::new(8, &config);
+        let mut lru = TestLru::new(8, &config).unwrap();
 
         assert_eq!(lru.high_priority_weight_capacity, 4);
 
@@ -538,7 +536,7 @@ pub mod tests {
                         hash: 0,
                         weight: 1,
                     }));
-                    let mut lru = TestLru::new(10, &LruConfig::default());
+                    let mut lru = TestLru::new(10, &LruConfig::default()).unwrap();
                     lru.push(record.clone());
                     lru.acquire_mutable(&record);
                     if clear {
@@ -582,7 +580,7 @@ pub mod tests {
         let config = LruConfig {
             high_priority_pool_ratio: 1.0,
         };
-        let mut lru = TestLru::new(1, &config);
+        let mut lru = TestLru::new(1, &config).unwrap();
 
         lru.push(record.clone());
         lru.acquire_mutable(&record);

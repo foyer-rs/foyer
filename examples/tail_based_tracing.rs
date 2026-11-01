@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
+        .storage()?
         .with_engine_config(BlockEngineConfig::new(device))
         .build()
         .await?;

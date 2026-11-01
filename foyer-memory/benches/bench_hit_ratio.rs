@@ -90,6 +90,7 @@ fn new_fifo_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
         .with_shards(SHARDS)
         .with_eviction_config(FifoConfig {})
         .build()
+        .unwrap()
 }
 
 fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
@@ -99,6 +100,7 @@ fn new_lru_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
             high_priority_pool_ratio: 0.1,
         })
         .build()
+        .unwrap()
 }
 
 fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
@@ -111,6 +113,7 @@ fn new_lfu_cache(capacity: usize) -> Cache<CacheKey, CacheValue> {
             cmsketch_confidence: 0.9,
         })
         .build()
+        .unwrap()
 }
 
 fn new_s3fifo_cache_wo_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
@@ -122,6 +125,7 @@ fn new_s3fifo_cache_wo_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
             small_to_main_freq_threshold: 2,
         })
         .build()
+        .unwrap()
 }
 
 fn new_s3fifo_cache_w_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
@@ -133,6 +137,7 @@ fn new_s3fifo_cache_w_ghost(capacity: usize) -> Cache<CacheKey, CacheValue> {
             small_to_main_freq_threshold: 2,
         })
         .build()
+        .unwrap()
 }
 
 fn bench_workload(keys: Vec<String>, cache_size: usize) {

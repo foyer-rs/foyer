@@ -104,7 +104,8 @@ async fn main() {
     // Build a cache with `PrometheusMetricsRegistry`.
     let _: Cache<String, String> = CacheBuilder::new(100)
         .with_metrics_registry(Box::new(PrometheusMetricsRegistry::new(registry)))
-        .build();
+        .build()
+        .unwrap();
 
     // > curl http://127.0.0.1:19970
     //

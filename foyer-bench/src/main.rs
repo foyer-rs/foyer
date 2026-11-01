@@ -652,6 +652,7 @@ async fn benchmark(args: Args) {
     let mut builder = builder
         .with_weighter(|_: &u64, value: &Value| u64::BITS as usize / 8 + value.len())
         .storage()
+        .unwrap()
         .with_io_engine_config(io_engine_builder)
         .with_engine_config(engine_config);
 

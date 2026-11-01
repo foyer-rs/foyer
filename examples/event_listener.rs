@@ -43,7 +43,8 @@ fn main() {
         .with_event_listener(Arc::new(EchoEventListener))
         .with_eviction_config(FifoConfig::default())
         .with_shards(1)
-        .build();
+        .build()
+        .unwrap();
 
     cache.insert(1, "Second".to_string());
     cache.insert(2, "First".to_string());

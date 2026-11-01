@@ -507,7 +507,7 @@ mod tests {
     async fn test_build_with_unaligned_buffer_pool_size() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u64, u64> = CacheBuilder::new(10).build();
+        let memory: Cache<u64, u64> = CacheBuilder::new(10).build().unwrap();
         let _ = StoreBuilder::new("test", memory, metrics)
             .with_io_engine_config(PsyncIoEngineConfig::new())
             .with_engine_config(
@@ -530,8 +530,10 @@ mod tests {
     async fn test_entry_hash_collision() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u128, String, ModHasher> =
-            CacheBuilder::new(10).with_hash_builder(ModHasher::default()).build();
+        let memory: Cache<u128, String, ModHasher> = CacheBuilder::new(10)
+            .with_hash_builder(ModHasher::default())
+            .build()
+            .unwrap();
 
         let e1 = memory.insert(1, "foo".to_string());
         let e2 = memory.insert(1 + 1 + u64::MAX as u128, "bar".to_string());
@@ -569,7 +571,7 @@ mod tests {
     async fn test_may_contains_in_flight_entry() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build().unwrap();
 
         // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
         let flush_switch = Switch::default();
@@ -616,7 +618,7 @@ mod tests {
     async fn test_may_contains_in_flight_entry_after_delete() {
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build().unwrap();
 
         // Hold the flusher so that the enqueued entry stays in the keeper and never reaches the device.
         let flush_switch = Switch::default();
@@ -662,7 +664,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let metrics = Arc::new(Metrics::noop());
-        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build();
+        let memory: Cache<u64, Vec<u8>> = CacheBuilder::new(10).build().unwrap();
 
         let switch = Switch::default();
         switch.on();

@@ -76,7 +76,7 @@ The in-memory cache setup is extremely easy and can be setup in at least 1 line.
 ```rust
 use foyer::{Cache, CacheBuilder};
 
-let cache: Cache<String, String> = CacheBuilder::new(16).build();
+let cache: Cache<String, String> = CacheBuilder::new(16).build().unwrap();
 
 let entry = cache.insert("hello".to_string(), "world".to_string());
 let e = cache.get("hello").unwrap();
@@ -101,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
+        .storage()?
         // use block-based disk cache engine with default configuration
         .with_engine_config(BlockEngineConfig::new(device))
         .build()
@@ -157,7 +157,7 @@ async fn main() -> anyhow::Result<()> {
         .with_hash_builder(BuildHasherDefault::default())
         .with_weighter(|_key, value: &String| value.len())
         .with_filter(|_, _| true)
-        .storage()
+        .storage()?
         .with_io_engine_config(PsyncIoEngineConfig::new())
         .with_engine_config(
             BlockEngineConfig::new(device)

@@ -95,14 +95,14 @@ where
     type Properties = P;
     type State = SieveState;
 
-    fn new(_capacity: usize, _config: &Self::Config) -> Self
+    fn new(_capacity: usize, _config: &Self::Config) -> Result<Self>
     where
         Self: Sized,
     {
-        Self {
+        Ok(Self {
             queue: LinkedList::new(Adapter::new()),
             hand: None,
-        }
+        })
     }
 
     fn update(&mut self, _: usize, _: Option<&Self::Config>) -> Result<()> {
@@ -212,7 +212,7 @@ pub mod tests {
             })
             .collect_vec();
         let r = |i: usize| rs[i].clone();
-        let mut sieve = TestSieve::new(100, &SieveConfig {});
+        let mut sieve = TestSieve::new(100, &SieveConfig {}).unwrap();
 
         // 0, 1, 2, 3
         sieve.push(r(0));

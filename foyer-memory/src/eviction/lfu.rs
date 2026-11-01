@@ -47,15 +47,39 @@ pub struct LfuConfig {
     /// Must guarantee `window_capacity_ratio + protected_capacity_ratio < 1`.
     pub protected_capacity_ratio: f64,
 
-    /// Error of the count-min sketch.
+    /// Error of the count-min sketch. Cannot be changed after construction.
     ///
     /// See [`CountMinSketch::suggest_num_buckets`].
     pub cmsketch_eps: f64,
 
-    /// Confidence of the count-min sketch.
+    /// Confidence of the count-min sketch. Cannot be changed after construction.
     ///
     /// See [`CountMinSketch::suggest_num_hashes`].
     pub cmsketch_confidence: f64,
+}
+
+impl LfuConfig {
+    fn validate_ratios(&self) -> Result<()> {
+        for (name, ratio) in [
+            ("window_capacity_ratio", self.window_capacity_ratio),
+            ("protected_capacity_ratio", self.protected_capacity_ratio),
+        ] {
+            if !(ratio > 0.0 && ratio < 1.0) {
+                return Err(
+                    Error::new(ErrorKind::Config, "LFU capacity ratios must be in (0, 1)").with_context(name, ratio)
+                );
+            }
+        }
+        if self.window_capacity_ratio + self.protected_capacity_ratio >= 1.0 {
+            return Err(Error::new(
+                ErrorKind::Config,
+                "window_capacity_ratio + protected_capacity_ratio must be less than 1",
+            )
+            .with_context("window_capacity_ratio", self.window_capacity_ratio)
+            .with_context("protected_capacity_ratio", self.protected_capacity_ratio));
+        }
+        Ok(())
+    }
 }
 
 impl Default for LfuConfig {
@@ -182,43 +206,37 @@ where
     type Properties = P;
     type State = LfuState;
 
-    fn new(capacity: usize, config: &Self::Config) -> Self
+    fn new(capacity: usize, config: &Self::Config) -> Result<Self>
     where
         Self: Sized,
     {
-        assert!(
-            config.window_capacity_ratio > 0.0 && config.window_capacity_ratio < 1.0,
-            "window_capacity_ratio must be in (0, 1), given: {}",
-            config.window_capacity_ratio
-        );
-
-        assert!(
-            config.protected_capacity_ratio > 0.0 && config.protected_capacity_ratio < 1.0,
-            "protected_capacity_ratio must be in (0, 1), given: {}",
-            config.protected_capacity_ratio
-        );
-
-        assert!(
-            config.window_capacity_ratio + config.protected_capacity_ratio < 1.0,
-            "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}",
-            config.window_capacity_ratio + config.protected_capacity_ratio
-        );
+        config.validate_ratios()?;
 
         let config = config.clone();
 
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
 
-        let num_hashes =
-            CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence).expect("invalid cmsketch_confidence");
-        let num_buckets =
-            CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps).expect("invalid cmsketch_eps");
-        let frequencies =
-            CountMinSketch::<u16>::new(num_hashes, num_buckets).expect("invalid count-min sketch dimensions");
+        let num_hashes = CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence).map_err(|source| {
+            Error::new(ErrorKind::Config, "invalid cmsketch_confidence")
+                .with_context("cmsketch_confidence", config.cmsketch_confidence)
+                .with_source(source)
+        })?;
+        let num_buckets = CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps).map_err(|source| {
+            Error::new(ErrorKind::Config, "invalid cmsketch_eps")
+                .with_context("cmsketch_eps", config.cmsketch_eps)
+                .with_source(source)
+        })?;
+        let frequencies = CountMinSketch::<u16>::new(num_hashes, num_buckets).map_err(|source| {
+            Error::new(ErrorKind::Config, "invalid count-min sketch dimensions")
+                .with_context("num_hashes", num_hashes)
+                .with_context("num_buckets", num_buckets)
+                .with_source(source)
+        })?;
         // The sketch's total weight is also u16, so age it before another update can overflow.
         let decay = (num_buckets as usize).min(usize::from(u16::MAX));
 
-        Self {
+        Ok(Self {
             window: LinkedList::new(Adapter::new()),
             probation: LinkedList::new(Adapter::new()),
             protected: LinkedList::new(Adapter::new()),
@@ -231,43 +249,23 @@ where
             step: 0,
             decay,
             config,
-        }
+        })
     }
 
     fn update(&mut self, capacity: usize, config: Option<&Self::Config>) -> Result<()> {
         if let Some(config) = config {
-            let mut reasons = vec![];
-            if config.window_capacity_ratio <= 0.0 || config.window_capacity_ratio >= 1.0 {
-                reasons.push(format!(
-                    "window_capacity_ratio must be in (0, 1), given: {}, new config ignored",
-                    config.window_capacity_ratio
+            config.validate_ratios()?;
+            if config.cmsketch_eps != self.config.cmsketch_eps
+                || config.cmsketch_confidence != self.config.cmsketch_confidence
+            {
+                return Err(Error::new(
+                    ErrorKind::Config,
+                    "count-min sketch parameters cannot be changed after construction",
                 ));
-            }
-            if config.protected_capacity_ratio <= 0.0 || config.protected_capacity_ratio >= 1.0 {
-                reasons.push(format!(
-                    "protected_capacity_ratio must be in (0, 1), given: {}, new config ignored",
-                    config.protected_capacity_ratio
-                ));
-            }
-            if config.window_capacity_ratio + config.protected_capacity_ratio >= 1.0 {
-                reasons.push(format!(
-                    "must guarantee: window_capacity_ratio + protected_capacity_ratio < 1, given: {}, new config ignored",
-                    config.window_capacity_ratio + config.protected_capacity_ratio
-                ));
-            }
-
-            if !reasons.is_empty() {
-                let mut e = Error::new(ErrorKind::Config, "update LFU config failed");
-                for reason in reasons.iter() {
-                    e = e.with_context("reason", reason);
-                }
-                return Err(e);
             }
 
             self.config = config.clone();
         }
-
-        // TODO(MrCroxx): Raise a warn log the cmsketch args updates is not supported yet if it is modified.
 
         let window_weight_capacity = (capacity as f64 * self.config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * self.config.protected_capacity_ratio) as usize;
@@ -482,13 +480,45 @@ mod tests {
     type TestLfu = Lfu<u64, u64, TestProperties>;
 
     #[test]
+    fn test_rejected_update_preserves_configuration() {
+        let mut lfu = TestLfu::new(10, &LfuConfig::default()).unwrap();
+        lfu.update(
+            20,
+            Some(&LfuConfig {
+                window_capacity_ratio: 0.15,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let capacity = lfu.window_weight_capacity;
+        for config in [
+            LfuConfig {
+                window_capacity_ratio: f64::NAN,
+                ..Default::default()
+            },
+            LfuConfig {
+                cmsketch_eps: 0.01,
+                ..Default::default()
+            },
+            LfuConfig {
+                cmsketch_confidence: 0.99,
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(lfu.update(100, Some(&config)).unwrap_err().kind(), ErrorKind::Config);
+            assert_eq!(lfu.config.window_capacity_ratio, 0.15);
+            assert_eq!(lfu.window_weight_capacity, capacity);
+        }
+    }
+
+    #[test]
     fn test_lfu_frequency_aging() {
         for cmsketch_eps in [LfuConfig::default().cmsketch_eps, 0.00001] {
             let config = LfuConfig {
                 cmsketch_eps,
                 ..Default::default()
             };
-            let mut lfu = TestLfu::new(10, &config);
+            let mut lfu = TestLfu::new(10, &config).unwrap();
             let record = |key| {
                 Arc::new(Record::new(Data {
                     key,
@@ -535,7 +565,7 @@ mod tests {
             cmsketch_eps: 0.01,
             cmsketch_confidence: 0.95,
         };
-        let mut lfu = TestLfu::new(10, &config);
+        let mut lfu = TestLfu::new(10, &config).unwrap();
 
         assert_eq!(lfu.window_weight_capacity, 2);
         assert_eq!(lfu.protected_weight_capacity, 6);

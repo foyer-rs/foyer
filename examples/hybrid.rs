@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let hybrid: HybridCache<u64, String> = HybridCacheBuilder::new()
         .memory(64 * 1024 * 1024)
-        .storage()
+        .storage()?
         // use block-based disk cache engine with default configuration
         .with_engine_config(BlockEngineConfig::new(device))
         .build()
