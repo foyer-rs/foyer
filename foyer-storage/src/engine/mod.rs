@@ -148,6 +148,11 @@ where
     V: StorageValue,
     P: Properties,
 {
+    /// Apply the store's disk entry compression setting.
+    ///
+    /// Engines that manage their own encoding can leave the default implementation.
+    fn set_compression(&mut self, _compression: crate::Compression) {}
+
     /// Build the engine with the given configurations.
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
 

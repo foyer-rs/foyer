@@ -450,7 +450,7 @@ where
             .io_engine_config
             .unwrap_or_else(|| PsyncIoEngineConfig::new().boxed());
 
-        let engine_builder = match self.engine_config {
+        let mut engine_builder = match self.engine_config {
             Some(eb) => eb,
             None => {
                 tracing::info!(
@@ -461,6 +461,7 @@ where
             }
         };
 
+        engine_builder.set_compression(compression);
         let engine = engine_builder
             .build(EngineBuildContext {
                 io_engine_config,

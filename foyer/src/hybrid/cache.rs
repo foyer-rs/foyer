@@ -1503,6 +1503,31 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    async fn test_disk_cache_compression() {
+        let dir = tempfile::tempdir().unwrap();
+        let device = FsDeviceBuilder::new(dir.path()).with_capacity(16 * MB).build().unwrap();
+        let hybrid = HybridCacheBuilder::new()
+            .memory(4 * MB)
+            .storage()
+            .with_engine_config(BlockEngineConfig::new(device).with_block_size(MB))
+            .with_compression(crate::Compression::Zstd)
+            .build()
+            .await
+            .unwrap();
+        // This value can only fit in a disk block after compression.
+        let value = vec![42u8; 2 * MB];
+        hybrid.insert(1u64, value.clone());
+        hybrid.flush_if(|_, _| true).await;
+        hybrid.storage().wait().await;
+        assert!(hybrid.memory().get(&1).is_none());
+
+        let restored = hybrid.get(&1).await.unwrap().expect("compressed disk entry");
+        assert_eq!(restored.source(), Source::Disk);
+        assert_eq!(restored.value(), &value);
+        hybrid.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
     async fn test_flush_if() {
         let dir = tempfile::tempdir().unwrap();
         let hybrid = open(dir.path()).await;

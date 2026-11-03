@@ -470,6 +470,10 @@ where
     V: StorageValue,
     P: Properties,
 {
+    fn set_compression(&mut self, compression: Compression) {
+        self.compression = compression;
+    }
+
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>> {
         async move { self.build(ctx).await.map(|e| e as Arc<dyn Engine<K, V, P>>) }.boxed()
     }
