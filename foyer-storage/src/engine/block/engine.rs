@@ -50,7 +50,6 @@ use super::{
 use crate::test_utils::*;
 use crate::{
     Device, Load, RejectAll, Statistics, StorageFilter, StorageFilterResult,
-    compress::Compression,
     engine::{
         Engine, EngineBuildContext, EngineConfig, Populated,
         block::{
@@ -87,7 +86,6 @@ where
 {
     device: Arc<dyn Device>,
     block_size: usize,
-    compression: Compression,
     indexer_shards: usize,
     recover_concurrency: usize,
     flushers: usize,
@@ -117,7 +115,6 @@ where
         f.debug_struct("BlockEngineConfig")
             .field("device", &self.device)
             .field("block_size", &self.block_size)
-            .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("flushers", &self.flushers)
@@ -145,7 +142,6 @@ where
         Self {
             device,
             block_size: 16 * 1024 * 1024, // 16 MiB
-            compression: Compression::default(),
             indexer_shards: 64,
             recover_concurrency: 8,
             flushers: 1,
@@ -332,6 +328,7 @@ where
             metrics,
             spawner: runtime,
             recover_mode,
+            compression,
         }: EngineBuildContext,
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
         let io_engine = io_engine_config
@@ -427,7 +424,7 @@ where
                 block_size,
                 io_buffer_size,
                 self.blob_index_size,
-                self.compression,
+                compression,
                 indexer.clone(),
                 block_manager.clone(),
                 tombstone_log.clone(),
@@ -470,10 +467,6 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn set_compression(&mut self, compression: Compression) {
-        self.compression = compression;
-    }
-
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>> {
         async move { self.build(ctx).await.map(|e| e as Arc<dyn Engine<K, V, P>>) }.boxed()
     }
@@ -875,6 +868,7 @@ mod tests {
     use super::*;
     use crate::{
         PsyncIoEngineConfig, RejectAll,
+        compress::Compression,
         engine::RecoverMode,
         io::{
             device::{DeviceBuilder, combined::CombinedDeviceBuilder, fs::FsDeviceBuilder},
@@ -912,7 +906,6 @@ mod tests {
         let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
-            compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
@@ -937,6 +930,7 @@ mod tests {
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
+                compression: Compression::None,
             })
             .await
             .unwrap()
@@ -954,7 +948,6 @@ mod tests {
         let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
-            compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
@@ -978,6 +971,7 @@ mod tests {
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
+                compression: Compression::None,
             })
             .await
             .unwrap()
@@ -1404,6 +1398,7 @@ mod tests {
                 metrics: Arc::new(Metrics::noop()),
                 spawner,
                 recover_mode: RecoverMode::None,
+                compression: Compression::None,
             })
             .await
             .unwrap();

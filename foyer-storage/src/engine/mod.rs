@@ -138,6 +138,8 @@ pub struct EngineBuildContext {
     pub spawner: Spawner,
     /// The recover mode of the disk cache engine.
     pub recover_mode: RecoverMode,
+    /// Compression for engines that encode disk cache entries.
+    pub compression: crate::Compression,
 }
 
 /// Disk cache engine config trait.
@@ -148,11 +150,6 @@ where
     V: StorageValue,
     P: Properties,
 {
-    /// Apply the store's disk entry compression setting.
-    ///
-    /// Engines that manage their own encoding can leave the default implementation.
-    fn set_compression(&mut self, _compression: crate::Compression) {}
-
     /// Build the engine with the given configurations.
     fn build(self: Box<Self>, ctx: EngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn Engine<K, V, P>>>>;
 
