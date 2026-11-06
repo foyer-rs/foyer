@@ -105,7 +105,7 @@ where
         used: Arc<AtomicUsize>,
         limit: usize,
     ) -> Option<Self> {
-        used.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+        used.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
             current.checked_add(estimated_size).filter(|next| *next <= limit)
         })
         .ok()?;
