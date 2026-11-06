@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn test_lz4_finalization_failure_preserves_buffer_entries() {
         let mut buffer = Buffer::new(IoSliceMut::new(2 * PAGE), 2 * PAGE, Arc::new(Metrics::noop()));
-        assert!(buffer.push(&1u64, &vec![7u8; 128], 1, Compression::None, 1));
+        assert!(buffer.push(&1u8, &vec![7u8; 128], 1, Compression::None, 1));
         let first_bytes = buffer.bytes[..buffer.entry_infos[0].len].to_vec();
         let remaining = PAGE - EntryHeader::serialized_len();
 
@@ -524,15 +524,21 @@ mod tests {
                 let before_finish = encoder.writer().len();
                 let (complete, result) = encoder.finish();
                 result.unwrap();
-                (before_finish <= remaining && complete.len() > remaining).then_some(value)
+                // Without the footer, the key must also fit so a missing finish would accept the entry.
+                (before_finish + 2u8.estimated_size() <= remaining && complete.len() > remaining).then_some(value)
             })
             .expect("a payload ending at the frame-footer boundary");
 
-        assert!(!buffer.push(&2u64, &value, 2, Compression::Lz4, 2));
+        assert!(!buffer.push(&2u8, &value, 2, Compression::Lz4, 2));
         assert_eq!(buffer.written, PAGE);
         assert_eq!(buffer.entry_infos.len(), 1);
         assert_eq!(&buffer.bytes[..first_bytes.len()], first_bytes);
-        assert!(buffer.push(&3u64, &vec![9u8; 128], 3, Compression::None, 3));
+
+        let mut bounded = vec![0; remaining];
+        let error = EntrySerializer::serialize(&2u8, &value, Compression::Lz4, &mut bounded[..]).unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::BufferSizeLimit);
+
+        assert!(buffer.push(&3u8, &vec![9u8; 128], 3, Compression::None, 3));
         assert_eq!(
             buffer.entry_infos.iter().map(|info| info.hash).collect_vec(),
             vec![1, 3]

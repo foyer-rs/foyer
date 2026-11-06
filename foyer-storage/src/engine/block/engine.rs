@@ -937,7 +937,6 @@ mod tests {
         engine.hold_flush();
 
         let mut payloads = Vec::new();
-        let mut accepted = Vec::new();
         for key in 0..16u64 {
             let bytes = Arc::new(vec![42u8; MB]);
             payloads.push(Arc::downgrade(&bytes));
@@ -963,12 +962,9 @@ mod tests {
             })
             .await
             .unwrap();
-            if keeper.contains(hash, &key) {
-                accepted.push(key);
-            }
+            assert_eq!(keeper.contains(hash, &key), key < 2);
             assert!(engine.inner.submit_queue_size.load(Ordering::Relaxed) <= budget);
         }
-        assert_eq!(accepted.len(), 2);
         assert_eq!(payloads.iter().filter(|value| value.strong_count() > 0).count(), 2);
         assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), budget);
 
@@ -976,29 +972,11 @@ mod tests {
         engine.wait().await;
         assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
         assert!(payloads.iter().all(|value| value.strong_count() == 0));
-        for key in accepted {
+        for key in 0..2u64 {
             assert!(!keeper.contains(memory.hash(&key), &key));
             let (_, value, _) = engine.load(memory.hash(&key)).await.unwrap().entry().unwrap();
             assert_eq!(value.bytes.as_ref(), &vec![42u8; MB]);
         }
-
-        // An oversized entry is rejected even when the entire budget is available.
-        let encoded = Arc::new(AtomicBool::new(false));
-        let entry = memory.insert(
-            16,
-            TrackedValue {
-                bytes: Arc::new(vec![42u8; 3 * MB]),
-                encoded: encoded.clone(),
-            },
-        );
-        let size = EntrySerializer::estimated_size(entry.key(), entry.value());
-        let piece = keeper.insert(entry.piece());
-        memory.remove(&16);
-        drop(entry);
-        engine.enqueue(piece, size);
-        assert!(!encoded.load(Ordering::Relaxed));
-        assert!(!keeper.contains(memory.hash(&16), &16));
-        assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
 
         // A value that cannot fit the serialization buffer releases its reserved bytes.
         let mut random = 1u64;

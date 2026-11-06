@@ -241,7 +241,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lz4_frame_completion_and_finalization_error() {
+    fn test_lz4_frame_completion() {
         let value = vec![42u8; 64 * 1024];
         let mut encoded = Vec::new();
         let info = EntrySerializer::serialize(&1u64, &value, Compression::Lz4, &mut encoded).unwrap();
@@ -252,22 +252,5 @@ mod tests {
         let mut expected = Vec::new();
         value.encode(&mut expected).unwrap();
         assert_eq!(decoded, expected);
-
-        let mut encoder = lz4::EncoderBuilder::new()
-            .checksum(lz4::ContentChecksum::NoChecksum)
-            .auto_flush(true)
-            .build(Vec::new())
-            .unwrap();
-        value.encode(&mut encoder).unwrap();
-        let before_finish = encoder.writer().len();
-        let (complete, result) = encoder.finish();
-        result.unwrap();
-        assert_eq!(complete.len(), info.value_len);
-        assert!(complete.len() > before_finish);
-
-        // All payload bytes fit, but the bounded writer has no room for the frame footer.
-        let mut bounded = vec![0; before_finish];
-        let error = EntrySerializer::serialize_value(&value, &mut &mut bounded[..], Compression::Lz4).unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::BufferSizeLimit);
     }
 }

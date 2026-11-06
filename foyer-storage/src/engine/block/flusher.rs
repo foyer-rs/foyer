@@ -717,10 +717,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_dropped_submissions_release_their_byte_budget() {
+    fn test_rejected_and_dropped_submissions_release_their_byte_budget() {
         let memory: Cache<u64, u64> = CacheBuilder::new(16).build();
         let keeper = crate::keeper::Keeper::new(1);
         let used = Arc::new(AtomicUsize::new(0));
+
+        // An oversized entry is rejected even when the entire budget is available.
+        let entry = keeper.insert(memory.insert(0, 0).piece());
+        assert!(WriteEntry::try_new(entry, 16, used.clone(), 15).is_none());
+        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert!(keeper.get(memory.hash(&0), &0).is_none());
+
         let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
         drop(rx);
         let entry = memory.insert(1, 1);
