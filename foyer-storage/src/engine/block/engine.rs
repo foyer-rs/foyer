@@ -1082,6 +1082,45 @@ mod tests {
         assert_eq!(r6, (6, vec![6; 7 * KB]));
     }
 
+    /// A device recovered with no clean block must still accept writes: every block holds data
+    /// (as after a stop between a flusher taking the last clean block and its reclaim finishing).
+    #[test_log::test(tokio::test)]
+    async fn test_store_write_after_recovery_without_clean_block() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let memory = cache_for_test();
+        let store = engine_for_test(dir.path()).await;
+        for i in 0..3 {
+            enqueue(&store, memory.insert(i, vec![i as u8; 11 * KB]));
+            store.wait().await;
+        }
+        store.close().await.unwrap();
+        drop(store);
+
+        // Overwrite every block file with a written one, so recovery finds 0 clean blocks.
+        let files = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .sorted()
+            .collect_vec();
+        let written = files
+            .iter()
+            .find(|p| std::fs::read(p).unwrap().iter().take(4 * KB).any(|&b| b != 0))
+            .unwrap()
+            .clone();
+        for file in files.iter().filter(|p| **p != written) {
+            std::fs::copy(&written, file).unwrap();
+        }
+
+        let store = engine_for_test(dir.path()).await;
+        enqueue(&store, memory.insert(42, vec![42; 11 * KB]));
+        tokio::time::timeout(std::time::Duration::from_secs(10), store.wait())
+            .await
+            .expect("flusher never got a clean block");
+        let r = store.load(memory.hash(&42)).await.unwrap().kv().unwrap();
+        assert_eq!(r, (42, vec![42; 11 * KB]));
+    }
+
     #[test_log::test(tokio::test)]
     async fn test_store_delete_recovery() {
         let dir = tempfile::tempdir().unwrap();
