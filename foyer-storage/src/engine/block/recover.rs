@@ -194,7 +194,7 @@ impl BlockRecoverRunner {
 
         let id = block.id();
         let mut iter = BlockScanner::new(block, blob_index_size);
-        'recover: loop {
+        loop {
             let r = iter.next().await;
             let infos = match r {
                 Ok(Some(infos)) => infos,
@@ -209,12 +209,7 @@ impl BlockRecoverRunner {
                 }
             };
 
-            for info in infos {
-                if info.addr.sequence < recovered.last().map(|last: &EntryInfo| last.addr.sequence).unwrap_or(0) {
-                    break 'recover;
-                }
-                recovered.push(info);
-            }
+            recovered.extend(infos);
         }
 
         Ok(recovered)
