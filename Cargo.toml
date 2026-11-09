@@ -99,7 +99,7 @@ tonic = { version = "0.14.6", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 twox-hash = { version = "2.1.2", default-features = false }
-zstd = "0.13"
+zstd = "0.14.3"
 
 [workspace.lints.rust]
 missing_docs = "warn"
