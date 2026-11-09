@@ -78,12 +78,19 @@ impl BlobEntryIndex {
 /// # Format
 ///
 /// ```plain
-/// | checksum (8B) | count (4B) | index 0 | index 1 | ... | index N |
+/// | versioned checksum (8B) | count (4B) | region incarnation (16B) | indices ... |
 /// ```
+///
+/// Logical entry sequences order updates/deletes, not physical writes: a
+/// reinsertion keeps its old sequence. The incarnation identifies one use of a
+/// region and is shared by all its blobs, including later partial index writes.
+/// The checksum domain distinguishes this format from the legacy 12-byte header;
+/// legacy readers reject it as a miss rather than misinterpreting its layout.
 #[derive(Debug)]
 pub struct BlobIndex {
     bytes: IoSliceMut,
     count: usize,
+    incarnation: u128,
 }
 
 impl BlobIndex {
@@ -92,10 +99,18 @@ impl BlobIndex {
     pub const COUNT_OFFSET: usize = 8;
     pub const COUNT_BYTES: usize = 4;
 
-    pub const INDEX_OFFSET: usize = 12;
+    const LEGACY_INDEX_OFFSET: usize = 12;
+    pub const INDEX_OFFSET: usize = 28;
+    const CHECKSUM_DOMAIN: u64 = u64::from_be_bytes(*b"FOYERBL2");
 
-    pub fn new(bytes: IoSliceMut) -> Self {
-        Self { bytes, count: 0 }
+    pub fn new(mut bytes: IoSliceMut) -> Self {
+        // The checksum includes padding as well as the populated index entries.
+        bytes.fill(0);
+        Self {
+            bytes,
+            count: 0,
+            incarnation: rand::random(),
+        }
     }
 
     pub fn capacity(&self) -> usize {
@@ -120,7 +135,8 @@ impl BlobIndex {
     pub fn seal(&mut self) -> IoSliceMut {
         (&mut self.bytes[BlobIndex::COUNT_OFFSET..BlobIndex::COUNT_OFFSET + BlobIndex::COUNT_BYTES])
             .put_u32(self.count as _);
-        let checksum = Checksummer::checksum64(&self.bytes[BlobIndex::CHECKSUM_BYTES..]);
+        (&mut self.bytes[BlobIndex::LEGACY_INDEX_OFFSET..BlobIndex::INDEX_OFFSET]).put_u128(self.incarnation);
+        let checksum = Checksummer::checksum64(&self.bytes[BlobIndex::CHECKSUM_BYTES..]) ^ Self::CHECKSUM_DOMAIN;
         (&mut self.bytes[0..BlobIndex::CHECKSUM_BYTES]).put_u64(checksum);
         self.bytes.clone()
     }
@@ -128,26 +144,61 @@ impl BlobIndex {
     pub fn reset(&mut self) {
         self.count = 0;
     }
+
+    pub fn reset_region(&mut self) {
+        self.reset();
+        // A fresh identity also separates regions across process restarts without
+        // depending on a recovered maximum logical sequence or a new global log.
+        self.incarnation = rand::random();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobGeneration {
+    Legacy,
+    Incarnation(u128),
+}
+
+#[derive(Debug)]
+pub struct DecodedBlobIndex {
+    pub generation: BlobGeneration,
+    pub entries: Vec<BlobEntryIndex>,
 }
 
 #[derive(Debug)]
 pub struct BlobIndexReader;
 
 impl BlobIndexReader {
-    pub fn read(buf: &[u8]) -> Option<Vec<BlobEntryIndex>> {
-        let checksum = Checksummer::checksum64(&buf[BlobIndex::CHECKSUM_BYTES..]);
-        let expected = (&buf[0..BlobIndex::CHECKSUM_BYTES]).get_u64();
-        if checksum != expected {
-            tracing::trace!(checksum, expected, "[blob index reader]: checksum mismatch");
+    pub fn read(buf: &[u8]) -> Option<DecodedBlobIndex> {
+        if buf.len() < BlobIndex::LEGACY_INDEX_OFFSET {
             return None;
         }
+        let checksum = Checksummer::checksum64(&buf[BlobIndex::CHECKSUM_BYTES..]);
+        let expected = (&buf[0..BlobIndex::CHECKSUM_BYTES]).get_u64();
+        let (generation, index_offset) = match checksum ^ expected {
+            0 => (BlobGeneration::Legacy, BlobIndex::LEGACY_INDEX_OFFSET),
+            BlobIndex::CHECKSUM_DOMAIN => (
+                BlobGeneration::Incarnation(
+                    buf.get(BlobIndex::LEGACY_INDEX_OFFSET..BlobIndex::INDEX_OFFSET)?
+                        .get_u128(),
+                ),
+                BlobIndex::INDEX_OFFSET,
+            ),
+            _ => {
+                tracing::trace!(checksum, expected, "[blob index reader]: checksum mismatch");
+                return None;
+            }
+        };
         let count =
             (&buf[BlobIndex::COUNT_OFFSET..BlobIndex::COUNT_OFFSET + BlobIndex::COUNT_BYTES]).get_u32() as usize;
-        let indices = buf[BlobIndex::INDEX_OFFSET..BlobIndex::INDEX_OFFSET + count * BlobEntryIndex::serialized_len()]
+        if count > (buf.len() - index_offset) / BlobEntryIndex::serialized_len() {
+            return None;
+        }
+        let entries = buf[index_offset..index_offset + count * BlobEntryIndex::serialized_len()]
             .chunks_exact(BlobEntryIndex::serialized_len())
             .map(BlobEntryIndex::read)
             .collect();
-        Some(indices)
+        Some(DecodedBlobIndex { generation, entries })
     }
 }
 
@@ -424,6 +475,7 @@ impl Splitter {
         tracing::trace!("[splitter]; split block");
         batch.blocks.push(Block { blob_parts: vec![] });
         ctx.current_blob_block_offset = 0;
+        ctx.current_blob_index.reset_region();
     }
 
     fn seal_blob(
@@ -509,13 +561,66 @@ mod tests {
 
         indices.iter().take(bi.capacity() / 2).for_each(|index| bi.write(index));
         let buf = bi.seal();
-        let ins = BlobIndexReader::read(&buf).unwrap();
+        let ins = BlobIndexReader::read(&buf).unwrap().entries;
         assert_eq!(indices.iter().take(bi.capacity() / 2).cloned().collect_vec(), ins);
 
         indices.iter().skip(bi.capacity() / 2).for_each(|index| bi.write(index));
         let buf = bi.seal();
-        let ins = BlobIndexReader::read(&buf).unwrap();
+        let ins = BlobIndexReader::read(&buf).unwrap().entries;
         assert_eq!(indices, ins);
+    }
+
+    #[test]
+    fn legacy_blob_index_remains_readable() {
+        // The pre-incarnation wire layout has a 12-byte header. Spell out its
+        // fields independently of the new writer so this is a migration check.
+        let mut page = vec![0; PAGE];
+        page[8..12].copy_from_slice(&1_u32.to_be_bytes());
+        page[12..20].copy_from_slice(&7_u64.to_be_bytes());
+        page[20..28].copy_from_slice(&9_u64.to_be_bytes());
+        page[28..32].copy_from_slice(&4096_u32.to_be_bytes());
+        page[32..36].copy_from_slice(&64_u32.to_be_bytes());
+        let checksum = Checksummer::checksum64(&page[8..]);
+        page[..8].copy_from_slice(&checksum.to_be_bytes());
+
+        let decoded = BlobIndexReader::read(&page).unwrap();
+        assert_eq!(decoded.generation, BlobGeneration::Legacy);
+        assert_eq!(
+            decoded.entries,
+            vec![BlobEntryIndex {
+                hash: 7,
+                sequence: 9,
+                offset: 4096,
+                len: 64
+            }]
+        );
+    }
+
+    #[test]
+    fn new_blob_indexes_use_a_distinct_checksum_domain_and_validate_counts() {
+        let mut index = BlobIndex::new(IoSliceMut::new(PAGE));
+        index.write(&BlobEntryIndex {
+            hash: 7,
+            sequence: 9,
+            offset: 4096,
+            len: 64,
+        });
+        let mut page = index.seal();
+        assert!(matches!(
+            BlobIndexReader::read(&page).unwrap().generation,
+            BlobGeneration::Incarnation(_)
+        ));
+        // Old readers compare these directly and must return a miss, not parse
+        // the incarnation bytes as entries with the legacy offsets.
+        let legacy_checksum = Checksummer::checksum64(&page[8..]);
+        let stored_checksum = u64::from_be_bytes(page[..8].try_into().unwrap());
+        assert_ne!(stored_checksum, legacy_checksum);
+
+        page[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
+        let checksum = Checksummer::checksum64(&page[8..]) ^ BlobIndex::CHECKSUM_DOMAIN;
+        page[..8].copy_from_slice(&checksum.to_be_bytes());
+        assert!(BlobIndexReader::read(&page).is_none());
+        assert!(BlobIndexReader::read(&page[..8]).is_none());
     }
 
     #[test_log::test]

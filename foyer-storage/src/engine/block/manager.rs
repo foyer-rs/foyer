@@ -306,6 +306,9 @@ impl BlockManager {
                 } else {
                     let (tx, rx) = oneshot::channel();
                     state.clean_block_waiters.push(tx);
+                    // Recovery can leave no clean regions. Waiting alone cannot
+                    // produce a writer completion that would start reclamation.
+                    this.reclaim_if_needed(&mut state);
                     drop(state);
                     rx
                 }
@@ -358,6 +361,7 @@ impl BlockManager {
         state.reclaiming_blocks.remove(&block.id());
         self.inner.metrics.storage_block_engine_block_reclaiming.decrease(1);
         if let Some(waiter) = state.clean_block_waiters.pop() {
+            state.writing_blocks.insert(block.id());
             self.inner.metrics.storage_block_engine_block_writing.increase(1);
             let _ = waiter.send(block);
         } else {

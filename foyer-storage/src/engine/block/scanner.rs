@@ -17,7 +17,10 @@ use itertools::Itertools;
 
 use super::indexer::EntryAddress;
 use crate::{
-    engine::block::{buffer::BlobIndexReader, manager::Block},
+    engine::block::{
+        buffer::{BlobGeneration, BlobIndexReader},
+        manager::Block,
+    },
     io::bytes::IoSliceMut,
 };
 
@@ -33,6 +36,9 @@ pub struct BlockScanner {
     offset: u64,
 
     blob_index_size: usize,
+    generation: Option<BlobGeneration>,
+    last_sequence: u64,
+    finished: bool,
 }
 
 impl BlockScanner {
@@ -41,18 +47,21 @@ impl BlockScanner {
             block,
             offset: 0,
             blob_index_size,
+            generation: None,
+            last_sequence: 0,
+            finished: false,
         }
     }
 
     pub async fn next(&mut self) -> Result<Option<Vec<EntryInfo>>> {
-        if self.offset as usize + self.blob_index_size > self.block.size() {
+        if self.finished || self.offset as usize + self.blob_index_size > self.block.size() {
             return Ok(None);
         }
 
         let bytes = Box::new(IoSliceMut::new(self.blob_index_size));
         let (bytes, res) = self.block.read(bytes, self.offset).await;
         res?;
-        let indices = match BlobIndexReader::read(&bytes) {
+        let decoded = match BlobIndexReader::read(&bytes) {
             Some(indices) => indices,
             None => {
                 tracing::trace!(
@@ -62,6 +71,16 @@ impl BlockScanner {
                 return Ok(None);
             }
         };
+
+        if self
+            .generation
+            .is_some_and(|generation| generation != decoded.generation)
+        {
+            self.finished = true;
+            return Ok(None);
+        }
+        self.generation = Some(decoded.generation);
+        let indices = decoded.entries;
 
         let step = indices
             .last()
@@ -77,6 +96,17 @@ impl BlockScanner {
 
         let infos = indices
             .into_iter()
+            .take_while(|index| {
+                // Existing legacy regions have no incarnation marker. Keep their
+                // conservative tail check; new regions may contain old logical
+                // sequences from reinsertion and use their incarnation instead.
+                if decoded.generation == BlobGeneration::Legacy && index.sequence < self.last_sequence {
+                    self.finished = true;
+                    return false;
+                }
+                self.last_sequence = index.sequence;
+                true
+            })
             .map(|index| EntryInfo {
                 hash: index.hash,
                 addr: EntryAddress {
