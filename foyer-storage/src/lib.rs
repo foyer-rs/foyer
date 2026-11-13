@@ -20,6 +20,7 @@ mod compress;
 mod engine;
 mod filter;
 mod io;
+mod iov2;
 mod keeper;
 mod serde;
 mod store;
