@@ -15,7 +15,7 @@ members = [
 [workspace.package]
 version = "0.22.6"
 edition = "2024"
-rust-version = "1.95.0"
+rust-version = "1.100.0"
 repository = "https://github.com/foyer-rs/foyer"
 homepage = "https://github.com/foyer-rs/foyer"
 keywords = ["cache", "hybrid"]
@@ -25,7 +25,6 @@ readme = "README.md"
 exclude = ["website/*"]
 
 [workspace.dependencies]
-allocator-api2 = "0.2"
 anyhow = "1"
 asyncband = { version = "0.7.1", features = [
   "barrier",
@@ -93,7 +92,6 @@ tempfile = "3"
 test-log = "0.2"
 tikv-jemallocator = "0.6"
 tokio = { package = "foyer-tokio", version = "0.22.6", path = "foyer-tokio", default-features = false }
-# tonic 0.14.6 bumped its MSRV to 1.88; pin to <0.14.6 to keep the workspace MSRV at 1.86.
 # Pulled in transitively via opentelemetry-otlp (grpc-tonic feature) in `examples`.
 tonic = { version = "0.14.6", default-features = false }
 tracing = "0.1"
