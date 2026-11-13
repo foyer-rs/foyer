@@ -140,6 +140,8 @@ impl EntrySerializer {
                     .build(&mut writer)
                     .map_err(Error::io_error)?;
                 value.encode(&mut encoder)?;
+                let (_, result) = encoder.finish();
+                result.map_err(Error::io_error)?;
             }
         }
         Ok(writer.written())
@@ -227,5 +229,28 @@ impl EntryDeserializer {
                 V::decode(&mut decoder)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use foyer_common::code::Code;
+
+    use super::*;
+
+    #[test]
+    fn test_lz4_frame_completion() {
+        let value = vec![42u8; 64 * 1024];
+        let mut encoded = Vec::new();
+        let info = EntrySerializer::serialize(&1u64, &value, Compression::Lz4, &mut encoded).unwrap();
+        let mut decoder = lz4::Decoder::new(&encoded[..info.value_len]).unwrap();
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).unwrap();
+        decoder.finish().1.unwrap();
+        let mut expected = Vec::new();
+        value.encode(&mut expected).unwrap();
+        assert_eq!(decoded, expected);
     }
 }

@@ -467,6 +467,7 @@ where
                 metrics: metrics.clone(),
                 spawner: spawner.clone(),
                 recover_mode: self.recover_mode,
+                compression,
             })
             .await?;
 
