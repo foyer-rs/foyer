@@ -29,7 +29,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.100.0
+          toolchain: stable
       - name: Run typos check
         uses: crate-ci/typos@master
       - name: Check if Grafana dashboards are minimized
@@ -75,7 +75,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.100.0
+          toolchain: stable
       - name: Run cargo machete
         uses: bnjbvr/cargo-machete@main
 
@@ -167,7 +167,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.100.0
+          toolchain: stable
           targets: x86_64-unknown-linux-musl
       - name: Install musl tools
         run: |
@@ -285,7 +285,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.100.0
+          toolchain: stable
           components: rustfmt, clippy
       - name: Cache Cargo home
         uses: actions/cache@v4
@@ -496,7 +496,7 @@ jobs:
       - name: Install rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.100.0
+          toolchain: stable
       - name: Cache Cargo home
         uses: actions/cache@v4
         id: cache
