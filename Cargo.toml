@@ -56,12 +56,7 @@ foyer-storage = { version = "0.22.6", path = "foyer-storage", default-features =
 fs4 = { version = "0.13", default-features = false }
 futures-core = { version = "0.3" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-hashbrown = { version = "0.17.1", default-features = false, features = [
-  "default-hasher",
-  "inline-more",
-  "equivalent",
-  "raw-entry",
-] }
+hashbrown = { version = "0.17.1" }
 hdrhistogram = "7"
 http-body-util = "0.1"
 humantime = "2"
