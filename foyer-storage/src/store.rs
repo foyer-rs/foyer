@@ -493,6 +493,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use foyer_common::hasher::ModHasher;
     use foyer_memory::CacheBuilder;
 
@@ -502,6 +504,13 @@ mod tests {
         engine::block::engine::BlockEngineConfig,
         io::{device::fs::FsDeviceBuilder, engine::psync::PsyncIoEngineConfig},
     };
+
+    fn nonzero(value: usize) -> NonZeroUsize {
+        match NonZeroUsize::new(value) {
+            Some(value) => value,
+            None => unreachable!("test constants are nonzero"),
+        }
+    }
 
     #[tokio::test]
     async fn test_build_with_unaligned_buffer_pool_size() {
@@ -517,7 +526,7 @@ mod tests {
                         .build()
                         .unwrap(),
                 )
-                .with_flushers(3)
+                .with_flushers(nonzero(3))
                 .with_block_size(16 * 1024)
                 .with_buffer_pool_size(128 * 1024 * 1024),
             )
