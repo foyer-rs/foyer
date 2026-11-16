@@ -26,7 +26,7 @@ exclude = ["website/*"]
 
 [workspace.dependencies]
 anyhow = "1"
-asyncband = { version = "0.7.1", features = [
+asyncband = { version = "0.8.0", features = [
   "barrier",
   "mpsc",
   "mutex",
