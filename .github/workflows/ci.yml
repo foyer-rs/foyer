@@ -224,10 +224,8 @@ jobs:
           cargo clippy --all-targets ${{ matrix.serde }} --features tracing -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} --features clap -- -D warnings
           cargo clippy --all-targets ${{ matrix.serde }} -- -D warnings
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
       - name: Run rust test with coverage (igored tests)
         env:
           RUST_BACKTRACE: 1
@@ -297,8 +295,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-opendal-redis
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@nextest
       - name: Run foyer-opendal Redis tests
         env:
           RUST_BACKTRACE: 1
@@ -336,10 +333,8 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-foyer-bench-fuzzy-test
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
       - name: Build foyer-bench
         env:
           RUST_BACKTRACE: 1
@@ -644,8 +639,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.toml') }}-${{ env.CACHE_KEY_SUFFIX }}-madsim
-      - if: steps.cache.outputs.cache-hit != 'true'
-        uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@nextest
       - name: Run rust check (madsim)
         env:
           RUST_BACKTRACE: 1
