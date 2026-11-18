@@ -117,6 +117,61 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+### Small-object Disk Cache
+
+`SmallEngineConfig` selects an independent bucket-based engine inspired by
+[CacheLib BigHash](https://cachelib.org/docs/Cache_Library_Architecture_Guide/navy_overview/).
+Multiple small objects share a bucket without per-object page padding. Hashes
+locate buckets directly; an 8-byte Bloom filter per bucket replaces the
+per-object address index. Full buckets evict their oldest records.
+
+```rust
+use foyer::{DeviceBuilder, FsDeviceBuilder, HybridCache, HybridCacheBuilder, SmallEngineConfig};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let device = FsDeviceBuilder::new(dir.path())
+        .with_capacity(256 * 1024 * 1024)
+        .build()?;
+    let cache: HybridCache<String, Vec<u8>> = HybridCacheBuilder::new()
+        .memory(1024)
+        .storage()
+        .with_engine_config(
+            SmallEngineConfig::new(device)
+                .with_bucket_size(16 * 1024)
+                .with_shards(16),
+        )
+        .build()
+        .await?;
+    cache.close().await?;
+    Ok(())
+}
+```
+
+The default bucket size is 4 KiB. Choose a larger bucket for larger objects:
+the serialized key/value and 20-byte entry header must fit after the bucket's
+40-byte header. Oversized replacements remove the old cached value. Every
+mutation reads and rewrites a whole bucket, so this trades write amplification
+and bucket-local contention for lower index memory and less disk padding.
+This engine is selected independently; it does not route large objects to
+BlockEngine automatically.
+
+Writes and deletes are ordered within each worker shard. Pending mutations
+temporarily hide their bucket from disk lookups. Queue overflow invalidates
+and clears the affected bucket, including its neighbors, to prevent stale
+updates from resurfacing. `close().await` drains workers and reports background
+I/O errors; `wait()` only drains them.
+
+Use a dedicated cache device and keep its capacity, bucket size, and key hashing
+stable across restarts. Startup scans buckets to rebuild Bloom filters. Strict
+recovery returns corruption errors, quiet recovery clears damaged buckets, and
+disabled recovery clears all buckets. Deletes need no tombstone log. Checksums
+detect torn buckets; this is a disposable cache without fsync/WAL durability.
+
+See [the runnable example](examples/small.rs) for insertion, disk recovery, and
+deletion across restarts.
+
 ### Fully Configured Hybrid Cache
 
 Here is an example of a hybrid cache setup with almost all configurations to show the possibilities of tuning.

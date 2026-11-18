@@ -23,6 +23,7 @@ pub use crate::{
             eviction::{EvictionInfo, EvictionPicker, FifoPicker, InvalidRatioPicker},
             manager::{Block, BlockStatistics},
         },
+        small::SmallEngineConfig,
     },
     filter::{
         StorageFilter, StorageFilterCondition, StorageFilterResult,
