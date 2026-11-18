@@ -62,6 +62,63 @@ use crate::{
     keeper::PieceRef,
 };
 
+#[derive(Debug)]
+struct EntryCharge {
+    bytes: usize,
+    used: Arc<AtomicUsize>,
+}
+
+impl Drop for EntryCharge {
+    fn drop(&mut self) {
+        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
+    }
+}
+
+pub struct WriteEntry<K, V, P>
+where
+    K: StorageKey,
+{
+    // Release the keeper reference before making its byte budget available again.
+    piece: PieceRef<K, V, P>,
+    charge: EntryCharge,
+}
+
+impl<K, V, P> Debug for WriteEntry<K, V, P>
+where
+    K: StorageKey,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteEntry")
+            .field("piece", &self.piece)
+            .field("estimated_size", &self.charge.bytes)
+            .finish()
+    }
+}
+
+impl<K, V, P> WriteEntry<K, V, P>
+where
+    K: StorageKey,
+{
+    pub fn try_new(
+        piece: PieceRef<K, V, P>,
+        estimated_size: usize,
+        used: Arc<AtomicUsize>,
+        limit: usize,
+    ) -> Option<Self> {
+        used.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(estimated_size).filter(|next| *next <= limit)
+        })
+        .ok()?;
+        Some(Self {
+            piece,
+            charge: EntryCharge {
+                bytes: estimated_size,
+                used,
+            },
+        })
+    }
+}
+
 pub enum Submission<K, V, P>
 where
     K: StorageKey,
@@ -69,8 +126,7 @@ where
     P: Properties,
 {
     CacheEntry {
-        piece: PieceRef<K, V, P>,
-        estimated_size: usize,
+        entry: WriteEntry<K, V, P>,
         sequence: Sequence,
     },
     Tombstone {
@@ -93,14 +149,9 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CacheEntry {
-                piece,
-                estimated_size,
-                sequence,
-            } => f
+            Self::CacheEntry { entry, sequence } => f
                 .debug_struct("CacheEntry")
-                .field("piece", piece)
-                .field("estimated_size", estimated_size)
+                .field("entry", entry)
                 .field("sequence", sequence)
                 .finish(),
             Self::Tombstone { tombstone, stats } => f
@@ -125,8 +176,6 @@ where
 {
     id: usize,
     tx: UnboundedSender<Submission<K, V, P>>,
-    submit_queue_size: Arc<AtomicUsize>,
-
     metrics: Arc<Metrics>,
 }
 
@@ -140,7 +189,6 @@ where
         Self {
             id: self.id,
             tx: self.tx.clone(),
-            submit_queue_size: self.submit_queue_size.clone(),
             metrics: self.metrics.clone(),
         }
     }
@@ -152,18 +200,9 @@ where
     V: StorageValue,
     P: Properties,
 {
-    pub fn new(
-        id: usize,
-        submit_queue_size: Arc<AtomicUsize>,
-        metrics: Arc<Metrics>,
-    ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
+    pub fn new(id: usize, metrics: Arc<Metrics>) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
         let (tx, rx) = asyncband::mpsc::unbounded();
-        let this = Self {
-            id,
-            tx,
-            submit_queue_size,
-            metrics,
-        };
+        let this = Self { id, tx, metrics };
         (this, rx)
     }
 
@@ -211,7 +250,6 @@ where
             piece_refs: vec![],
             rotate_buffer,
             queue_init: None,
-            submit_queue_size: self.submit_queue_size.clone(),
             block_manager,
             indexer,
             tombstone_log,
@@ -236,9 +274,6 @@ where
 
     pub fn submit(&self, submission: Submission<K, V, P>) {
         tracing::trace!(id = self.id, "[block engine flusher]: submit task: {submission:?}");
-        if let Submission::CacheEntry { estimated_size, .. } = &submission {
-            self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
-        }
         if let Err(e) = self.tx.send(submission) {
             tracing::error!(
                 id = self.id,
@@ -276,7 +311,7 @@ where
 {
     handle: Option<GetCleanBlockHandle>,
     waiters: Vec<oneshot::Sender<()>>,
-    piece_refs: Vec<PieceRef<K, V, P>>,
+    piece_refs: Vec<WriteEntry<K, V, P>>,
     init: Instant,
     io_slice: IoSlice,
     tombstone_infos: Vec<TombstoneInfo>,
@@ -296,7 +331,7 @@ where
     buffer: Option<Buffer>,
     ctx: SplitCtx,
     tombstone_infos: Vec<TombstoneInfo>,
-    piece_refs: Vec<PieceRef<K, V, P>>,
+    piece_refs: Vec<WriteEntry<K, V, P>>,
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
@@ -304,8 +339,6 @@ where
     ///
     /// Use this field to avoid allocation.
     rotate_buffer: Option<IoSliceMut>,
-
-    submit_queue_size: Arc<AtomicUsize>,
 
     current_block_handle: GetCleanBlockHandle,
 
@@ -424,11 +457,8 @@ where
         };
 
         match submission {
-            Submission::CacheEntry {
-                piece,
-                estimated_size,
-                sequence,
-            } => {
+            Submission::CacheEntry { entry, sequence } => {
+                let piece = &entry.piece;
                 let enqueued = self.buffer.as_mut().unwrap().push(
                     piece.key(),
                     piece.value(),
@@ -437,10 +467,9 @@ where
                     sequence,
                 );
                 if enqueued {
-                    self.piece_refs.push(piece);
+                    self.piece_refs.push(entry);
                 }
                 report(enqueued);
-                self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
             Submission::Tombstone { tombstone, stats } => self.tombstone_infos.push(TombstoneInfo { tombstone, stats }),
@@ -461,7 +490,7 @@ where
     fn submit_io_task(
         &self,
         batch: Batch,
-        piece_refs: Vec<PieceRef<K, V, P>>,
+        piece_refs: Vec<WriteEntry<K, V, P>>,
         tombstone_infos: Vec<TombstoneInfo>,
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
@@ -657,7 +686,7 @@ where
 
     fn handle_io_complete(
         &self,
-        piece_refs: Vec<PieceRef<K, V, P>>,
+        piece_refs: Vec<WriteEntry<K, V, P>>,
         waiters: Vec<oneshot::Sender<()>>,
         tombstone_infos: Vec<TombstoneInfo>,
         init: Instant,
@@ -678,5 +707,44 @@ where
         self.metrics
             .storage_queue_rotate_duration
             .record(init.elapsed().as_secs_f64());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer_memory::{Cache, CacheBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_rejected_and_dropped_submissions_release_their_byte_budget() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).build();
+        let keeper = crate::keeper::Keeper::new(1);
+        let used = Arc::new(AtomicUsize::new(0));
+
+        // An oversized entry is rejected even when the entire budget is available.
+        let entry = keeper.insert(memory.insert(0, 0).piece());
+        assert!(WriteEntry::try_new(entry, 16, used.clone(), 15).is_none());
+        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert!(keeper.get(memory.hash(&0), &0).is_none());
+
+        let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
+        drop(rx);
+        let entry = memory.insert(1, 1);
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, used.clone(), 16).unwrap();
+        assert_eq!(used.load(Ordering::Relaxed), 16);
+        flusher.submit(Submission::CacheEntry { entry, sequence: 1 });
+        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert!(keeper.get(memory.hash(&1), &1).is_none());
+
+        let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
+        let entry = memory.insert(2, 2);
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, used.clone(), 16).unwrap();
+        flusher.submit(Submission::CacheEntry { entry, sequence: 2 });
+        assert_eq!(used.load(Ordering::Relaxed), 16);
+        drop(flusher);
+        drop(rx);
+        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert!(keeper.get(memory.hash(&2), &2).is_none());
     }
 }

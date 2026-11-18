@@ -138,6 +138,8 @@ pub struct EngineBuildContext {
     pub spawner: Spawner,
     /// The recover mode of the disk cache engine.
     pub recover_mode: RecoverMode,
+    /// Compression for engines that encode disk cache entries.
+    pub compression: crate::Compression,
 }
 
 /// Disk cache engine config trait.
