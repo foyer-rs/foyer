@@ -301,7 +301,9 @@ impl BlockManager {
                     state.writing_blocks.insert(id);
                     this.inner.metrics.storage_block_engine_block_clean.decrease(1);
                     this.inner.metrics.storage_block_engine_block_writing.increase(1);
-                    this.reclaim_if_needed(&mut state);
+                    let reclaim = this.reclaim_if_needed(&mut state);
+                    drop(state);
+                    this.spawn_reclaim(reclaim);
                     return block;
                 } else {
                     let (tx, rx) = oneshot::channel();
@@ -350,7 +352,9 @@ impl BlockManager {
             "[block manager]: Block state transfers from writing to evictable."
         );
 
-        self.reclaim_if_needed(&mut state);
+        let reclaim = self.reclaim_if_needed(&mut state);
+        drop(state);
+        self.spawn_reclaim(reclaim);
     }
 
     fn on_reclaim_finish(&self, block: Block) {
@@ -364,15 +368,24 @@ impl BlockManager {
             self.inner.metrics.storage_block_engine_block_clean.increase(1);
             state.clean_blocks.push_back(block.id());
         }
-        self.reclaim_if_needed(&mut state);
+        let reclaim = self.reclaim_if_needed(&mut state);
         if state.reclaiming_blocks.is_empty() {
             for tx in std::mem::take(&mut state.reclaim_waiters) {
                 let _ = tx.send(());
             }
         }
+        drop(state);
+        self.spawn_reclaim(reclaim);
     }
 
-    fn reclaim_if_needed(&self, state: &mut RwLockWriteGuard<'_, State>) {
+    /// Pick a block to reclaim if the clean blocks run low, and return the reclaim future.
+    ///
+    /// The returned future MUST be spawned with [`Self::spawn_reclaim`] after the state lock is released. A spawner may
+    /// drop a future immediately (e.g. when its runtime is shutting down). Dropping the [`ReclaimingBlock`] held by the
+    /// future calls [`Self::on_reclaim_finish`], which takes the state lock again and would deadlock if it is still
+    /// held by the caller.
+    #[must_use]
+    fn reclaim_if_needed(&self, state: &mut RwLockWriteGuard<'_, State>) -> Option<BoxFuture<'static, ()>> {
         if state.clean_blocks.len() < self.inner.clean_block_threshold
             && state.reclaiming_blocks.len() < self.inner.reclaim_concurrency
             && let Some(block) = self.evict(state)
@@ -383,7 +396,14 @@ impl BlockManager {
                 block_manager: self.clone(),
                 block,
             };
-            let future = self.inner.reclaimer.reclaim(block);
+            return Some(self.inner.reclaimer.reclaim(block));
+        }
+        None
+    }
+
+    /// Spawn the reclaim future returned by [`Self::reclaim_if_needed`]. The state lock must not be held.
+    fn spawn_reclaim(&self, reclaim: Option<BoxFuture<'static, ()>>) {
+        if let Some(future) = reclaim {
             self.inner.spawner.spawn(future);
         }
     }
@@ -476,5 +496,109 @@ impl DerefMut for ReclaimingBlock {
 impl Drop for ReclaimingBlock {
     fn drop(&mut self) {
         self.block_manager.on_reclaim_finish(self.block.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{sync::mpsc, thread, time::Duration};
+
+    use bytesize::ByteSize;
+
+    use super::*;
+    use crate::{
+        PsyncIoEngineConfig,
+        engine::block::eviction::FifoPicker,
+        io::{
+            device::{DeviceBuilder, fs::FsDeviceBuilder},
+            engine::{IoEngineBuildContext, IoEngineConfig},
+        },
+    };
+
+    /// A reclaimer that holds the reclaiming block until the future is dropped, then finishes the reclaim.
+    #[derive(Debug)]
+    struct DropReclaimer;
+
+    impl ReclaimerTrait for DropReclaimer {
+        fn reclaim(&self, block: ReclaimingBlock) -> BoxFuture<'static, ()> {
+            async move { drop(block) }.boxed()
+        }
+    }
+
+    /// 4 blocks of 16 KiB, the first one is clean and the rest are evictable.
+    ///
+    /// The reclaims are spawned onto a runtime that is already shut down, which drops them immediately on the thread
+    /// that spawns them, like a runtime shutting down with a reclaim in flight.
+    fn block_manager_for_test(dir: impl AsRef<std::path::Path>) -> BlockManager {
+        let device = FsDeviceBuilder::new(dir)
+            .with_capacity(ByteSize::kib(64).as_u64() as _)
+            .build()
+            .unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let io_engine = runtime
+            .block_on(PsyncIoEngineConfig::new().boxed().build(IoEngineBuildContext {
+                spawner: Spawner::Handle(runtime.handle().clone()),
+            }))
+            .unwrap();
+
+        let closed = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let spawner = Spawner::Handle(closed.handle().clone());
+        drop(closed);
+
+        let block_manager = BlockManager::open(
+            device,
+            io_engine,
+            16 * 1024,
+            vec![Box::<FifoPicker>::default()],
+            Arc::new(DropReclaimer),
+            1,
+            2,
+            Arc::new(Metrics::noop()),
+            spawner,
+        )
+        .unwrap();
+        block_manager.init(&[0]);
+        block_manager
+    }
+
+    /// Run `f` on another thread, so that a deadlock fails the test instead of hanging it.
+    fn run_with_timeout<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(10))
+            .expect("block manager deadlocked: reclaim is spawned while holding the state lock")
+    }
+
+    #[cfg(not(madsim))]
+    #[test]
+    fn test_reclaim_dropped_by_spawner_does_not_deadlock() {
+        let dir = tempfile::tempdir().unwrap();
+        let block_manager = block_manager_for_test(dir.path());
+
+        run_with_timeout(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+
+            // Taking the last clean block reclaims, and the spawner drops the reclaim at once.
+            let block = runtime.block_on(block_manager.get_clean_block());
+            assert_eq!(block.id(), 0);
+            {
+                let state = block_manager.inner.state.read().unwrap();
+                assert!(state.reclaiming_blocks.is_empty());
+                assert_eq!(state.clean_blocks.len(), 2);
+                assert_eq!(state.evictable_blocks.len(), 1);
+            }
+
+            // Finishing a write makes the block evictable and reclaims, and the spawner drops the reclaim at once.
+            block_manager.on_writing_finish(block);
+            {
+                let state = block_manager.inner.state.read().unwrap();
+                assert!(state.reclaiming_blocks.is_empty());
+                assert_eq!(state.clean_blocks.len(), 2);
+                assert_eq!(state.evictable_blocks.len(), 2);
+            }
+        });
     }
 }
