@@ -291,10 +291,12 @@ impl Metrics {
             "foyer hybrid cache operations".into(),
             &["name", "op"],
         );
-        let foyer_hybrid_op_duration = registry.register_histogram_vec(
+        let foyer_hybrid_op_duration = registry.register_histogram_vec_with_buckets(
             "foyer_hybrid_op_duration".into(),
             "foyer hybrid cache operation durations".into(),
             &["name", "op"],
+            // 1us ~ 16s
+            Buckets::exponential(0.000_001, 2.0, 25),
         );
 
         let hybrid_insert = foyer_hybrid_op_total.counter(&[name.clone(), "insert".into()]);
