@@ -209,10 +209,14 @@ where
         let window_weight_capacity = (capacity as f64 * config.window_capacity_ratio) as usize;
         let protected_weight_capacity = (capacity as f64 * config.protected_capacity_ratio) as usize;
 
-        let num_hashes = CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence);
-        let num_buckets = CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps);
-        let frequencies = CountMinSketch::<u16>::new(num_hashes, num_buckets);
-        let decay = num_buckets as usize;
+        let num_hashes =
+            CountMinSketch::<u16>::suggest_num_hashes(config.cmsketch_confidence).expect("invalid cmsketch_confidence");
+        let num_buckets =
+            CountMinSketch::<u16>::suggest_num_buckets(config.cmsketch_eps).expect("invalid cmsketch_eps");
+        let frequencies =
+            CountMinSketch::<u16>::new(num_hashes, num_buckets).expect("invalid count-min sketch dimensions");
+        // The sketch's total weight is also u16, so age it before another update can overflow.
+        let decay = (num_buckets as usize).min(usize::from(u16::MAX));
 
         Self {
             window: LinkedList::new(Adapter::new()),
@@ -476,6 +480,38 @@ mod tests {
     }
 
     type TestLfu = Lfu<u64, u64, TestProperties>;
+
+    #[test]
+    fn test_lfu_frequency_aging() {
+        for cmsketch_eps in [LfuConfig::default().cmsketch_eps, 0.00001] {
+            let config = LfuConfig {
+                cmsketch_eps,
+                ..Default::default()
+            };
+            let mut lfu = TestLfu::new(10, &config);
+            let record = |key| {
+                Arc::new(Record::new(Data {
+                    key,
+                    value: key,
+                    properties: TestProperties::default(),
+                    hash: key,
+                    weight: 1,
+                }))
+            };
+            let hot = record(1);
+            let cold = record(2);
+
+            lfu.push(hot.clone());
+            // Cross the counter limit repeatedly, including when the requested bucket count exceeds it.
+            for _ in 0..usize::from(u16::MAX) * 2 {
+                lfu.acquire_mutable(&hot);
+            }
+            lfu.push(cold.clone());
+
+            assert_ptr_eq(&lfu.pop().unwrap(), &cold);
+            assert_ptr_eq(&lfu.pop().unwrap(), &hot);
+        }
+    }
 
     #[test]
     fn test_lfu() {
