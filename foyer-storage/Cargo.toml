@@ -17,7 +17,7 @@ default = ["tokio/runtime-tokio"]
 serde = ["dep:serde"]
 clap = ["dep:clap"]
 tracing = ["dep:fastrace", "foyer-common/tracing", "foyer-memory/tracing"]
-nightly = ["allocator-api2/nightly", "hashbrown/nightly"]
+nightly = ["hashbrown/nightly"]
 test_utils = []
 deadlock = ["parking_lot/deadlock_detection"]
 strict_assertions = [
@@ -26,7 +26,6 @@ strict_assertions = [
 ]
 
 [dependencies]
-allocator-api2 = { workspace = true }
 anyhow = { workspace = true }
 asyncband = { workspace = true }
 bytes = { workspace = true }

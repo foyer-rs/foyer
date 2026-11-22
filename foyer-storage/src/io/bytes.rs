@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::{
+    alloc::{Allocator, Global, Layout, handle_alloc_error},
     any::Any,
     fmt::Debug,
     ops::{Deref, DerefMut, RangeBounds},
@@ -21,7 +22,6 @@ use std::{
     sync::Arc,
 };
 
-use allocator_api2::alloc::{Allocator, Global, Layout, handle_alloc_error};
 use foyer_common::bits;
 
 use super::PAGE;
@@ -64,13 +64,12 @@ impl Raw {
     pub fn new(capacity: usize) -> Self {
         let capacity = bits::align_up(PAGE, capacity);
         let layout = unsafe { Layout::from_size_align_unchecked(capacity, PAGE) };
-        let mut nonnull = match Global.allocate(layout) {
+        let nonnull = match Global.allocate(layout) {
             Ok(nonnull) => nonnull,
             Err(_) => handle_alloc_error(layout),
         };
-        let slice = unsafe { nonnull.as_mut() };
-        let ptr = slice.as_mut_ptr();
-        let cap = slice.len();
+        let ptr = nonnull.cast::<u8>().as_ptr();
+        let cap = nonnull.len();
         Self { ptr, cap }
     }
 
@@ -344,8 +343,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_raw_allocation() {
+        for capacity in [0, 1, PAGE - 1, PAGE, PAGE + 1, PAGE * 2] {
+            let mut raw = Raw::new(capacity);
+            assert!(raw.cap >= capacity);
+            assert_eq!(raw.cap % PAGE, 0);
+            assert!(!raw.ptr.is_null());
+            assert_eq!(raw.ptr as usize % PAGE, 0);
+
+            raw.fill(0x5a);
+            let cloned = raw.clone();
+            assert_eq!(cloned, raw);
+
+            let (ptr, cap) = raw.into_raw_parts();
+            // SAFETY: The pointer and capacity came from `Raw::into_raw_parts`.
+            let raw = unsafe { Raw::from_raw_parts(ptr, cap) };
+            assert_eq!(raw.len(), cap);
+            assert!(raw.iter().all(|&byte| byte == 0x5a));
+        }
+    }
+
+    #[test]
     fn test_dyn() {
-        let raw = Raw::new(4096);
+        let mut raw = Raw::new(4096);
+        raw.fill(0);
         let _: Box<dyn IoBuf> = Box::new(raw.clone());
         let _: Box<dyn IoBufMut> = Box::new(raw.clone());
     }
