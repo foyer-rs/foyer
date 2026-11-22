@@ -1335,3 +1335,39 @@ mod tests {
         case(sieve()).await
     }
 }
+
+#[cfg(test)]
+mod closing_runtime_tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use super::*;
+
+    /// A fetch spawned onto a runtime that is shutting down is cancelled on the spot: tokio drops
+    /// the task's future synchronously on the spawning thread, and `RawFetch::drop` takes the
+    /// inflight lock to dequeue itself. The caller must not still hold that lock when it spawns,
+    /// or the thread deadlocks against itself.
+    #[test]
+    fn a_fetch_spawned_on_a_closing_runtime_does_not_deadlock() {
+        let cache: Cache<u64, u64> = CacheBuilder::new(16).with_shards(1).build();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let handle = rt.handle().clone();
+        rt.shutdown_background();
+        let done = Arc::new(AtomicBool::new(false));
+        let d = done.clone();
+        std::thread::spawn(move || {
+            let _enter = handle.enter();
+            drop(cache.get_or_fetch(&1u64, || async { Ok::<_, anyhow::Error>(42u64) }));
+            d.store(true, Ordering::SeqCst);
+        });
+        for _ in 0..50 {
+            if done.load(Ordering::SeqCst) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        panic!("get_or_fetch deadlocked on the inflight lock while the runtime was closing");
+    }
+}
