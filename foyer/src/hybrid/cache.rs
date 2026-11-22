@@ -987,6 +987,12 @@ where
             && *this.policy == HybridCachePolicy::WriteOnInsertion
             && this.store.is_enabled()
             && !this.ctx.throttled.load(Ordering::Relaxed)
+            && match entry.source() {
+                Source::Outer => true,
+                // Let the engine decide by age, e.g. the block engine rewrites `Old` entries before eviction.
+                Source::Disk => true,
+                Source::Memory => !this.store.may_contains(entry.key()),
+            }
         {
             this.store.enqueue(entry.piece(), false);
         }
