@@ -72,6 +72,10 @@ name = "hybrid"
 path = "hybrid.rs"
 
 [[example]]
+name = "small"
+path = "small.rs"
+
+[[example]]
 name = "hybrid_full"
 path = "hybrid_full.rs"
 

@@ -41,6 +41,9 @@ pub struct Metrics {
     pub storage_delete: BoxedCounter,
     pub storage_error: BoxedCounter,
     pub storage_false_positive: BoxedCounter,
+    pub storage_small_engine_enqueue_skip: BoxedCounter,
+    pub storage_small_engine_evict: BoxedCounter,
+    pub storage_small_engine_bucket_reset: BoxedCounter,
 
     pub storage_enqueue_duration: BoxedHistogram,
     pub storage_hit_duration: BoxedHistogram,
@@ -232,6 +235,14 @@ impl Metrics {
         let storage_throttled = foyer_storage_op_total.counter(&[name.clone(), "throttled".into()]);
         let storage_error = foyer_storage_op_total.counter(&[name.clone(), "error".into()]);
         let storage_false_positive = foyer_storage_op_total.counter(&[name.clone(), "false_positive".into()]);
+        let small = registry.register_counter_vec(
+            "foyer_storage_small_engine_op_total".into(),
+            "foyer small-object engine operations".into(),
+            &["name", "op"],
+        );
+        let storage_small_engine_enqueue_skip = small.counter(&[name.clone(), "enqueue_skip".into()]);
+        let storage_small_engine_evict = small.counter(&[name.clone(), "evict".into()]);
+        let storage_small_engine_bucket_reset = small.counter(&[name.clone(), "bucket_reset".into()]);
 
         let storage_enqueue_duration = foyer_storage_op_duration.histogram(&[name.clone(), "enqueue".into()]);
         let storage_hit_duration = foyer_storage_op_duration.histogram(&[name.clone(), "hit".into()]);
@@ -332,6 +343,9 @@ impl Metrics {
             storage_delete,
             storage_error,
             storage_false_positive,
+            storage_small_engine_enqueue_skip,
+            storage_small_engine_evict,
+            storage_small_engine_bucket_reset,
             storage_enqueue_duration,
             storage_hit_duration,
             storage_miss_duration,
