@@ -673,6 +673,10 @@ where
     S: HashBuilder + Debug,
 {
     /// Get cached entry with the given key from the hybrid cache.
+    ///
+    /// Lookup metrics are recorded when the result becomes available, even if the
+    /// returned future is never polled or is dropped. Durations exclude any delay
+    /// before the caller consumes the result. Coalesced requests are counted separately.
     pub fn get<Q>(&self, key: &Q) -> HybridGet<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
@@ -680,11 +684,12 @@ where
         root_span!(self, span, "foyer::hybrid::cache::get");
 
         let start = Instant::now();
+        let metrics = self.inner.metrics.clone();
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let spawner = self.inner.storage.spawner();
-        let inner = self.inner.memory.get_or_fetch_inner(
+        let inner = self.inner.memory.get_or_fetch_observed(
             key,
             || {
                 let key = key.to_owned();
@@ -716,15 +721,13 @@ where
             || None,
             ctx,
             spawner,
+            Some(move |result| record_lookup(&metrics, start, result, false)),
         );
 
-        let metrics = self.inner.metrics.clone();
         #[cfg(feature = "tracing")]
         let span_cancel_threshold = self.inner.tracing_config.record_hybrid_get_threshold();
         HybridGet {
             inner,
-            metrics,
-            start,
             #[cfg(feature = "tracing")]
             span,
             #[cfg(feature = "tracing")]
@@ -733,6 +736,10 @@ where
     }
 
     /// Get cached entry with the given key from the hybrid cache.
+    ///
+    /// Lookup metrics are recorded when the result becomes available, even if the
+    /// returned future is never polled or is dropped. Durations exclude any delay
+    /// before the caller consumes the result. Coalesced requests are counted separately.
     pub fn get_or_fetch<Q, F, FU, IT, ER>(&self, key: &Q, fetch: F) -> HybridGetOrFetch<K, V, S>
     where
         Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
@@ -744,12 +751,13 @@ where
         root_span!(self, span, "foyer::hybrid::cache::get_or_fetch");
 
         let start = Instant::now();
+        let metrics = self.inner.metrics.clone();
 
         let ctx = Arc::new(GetOrFetchCtx::default());
         let store = self.inner.storage.clone();
         let spawner = self.inner.storage.spawner();
         let fut = fetch();
-        let inner = self.inner.memory.get_or_fetch_inner(
+        let inner = self.inner.memory.get_or_fetch_observed(
             key,
             || {
                 let key = key.to_owned();
@@ -807,11 +815,11 @@ where
             },
             ctx.clone(),
             spawner,
+            Some(move |result| record_lookup(&metrics, start, result, true)),
         );
 
         let policy = self.inner.policy;
         let store = self.inner.storage.clone();
-        let metrics = self.inner.metrics.clone();
         #[cfg(feature = "tracing")]
         let span_cancel_threshold = self.inner.tracing_config.record_hybrid_get_or_fetch_threshold();
         HybridGetOrFetch {
@@ -819,8 +827,6 @@ where
             policy,
             store,
             ctx,
-            metrics,
-            start,
             #[cfg(feature = "tracing")]
             span,
             #[cfg(feature = "tracing")]
@@ -840,8 +846,6 @@ where
 {
     #[pin]
     inner: GetOrFetch<K, V, S, HybridCacheProperties>,
-    metrics: Arc<Metrics>,
-    start: Instant,
     #[cfg(feature = "tracing")]
     span: Span,
     #[cfg(feature = "tracing")]
@@ -874,27 +878,6 @@ where
         let _guard = this.span.set_local_parent();
         let res = ready!(this.inner.poll_inner(cx));
 
-        match res.as_ref() {
-            Ok(Some(_)) => {
-                this.metrics.hybrid_hit.increase(1);
-                this.metrics
-                    .hybrid_hit_duration
-                    .record(this.start.elapsed().as_secs_f64());
-            }
-            Ok(None) => {
-                this.metrics.hybrid_miss.increase(1);
-                this.metrics
-                    .hybrid_miss_duration
-                    .record(this.start.elapsed().as_secs_f64());
-            }
-            Err(_) => {
-                this.metrics.hybrid_error.increase(1);
-                this.metrics
-                    .hybrid_error_duration
-                    .record(this.start.elapsed().as_secs_f64());
-            }
-        }
-
         try_cancel!(this.span, *this.span_cancel_threshold);
 
         Poll::Ready(res)
@@ -919,8 +902,6 @@ where
     pub fn try_unwrap(self) -> std::result::Result<HybridCacheEntry<K, V, S>, Self> {
         self.inner.try_unwrap().map_err(|inner| Self {
             inner,
-            metrics: self.metrics,
-            start: self.start,
             #[cfg(feature = "tracing")]
             span: self.span,
             #[cfg(feature = "tracing")]
@@ -948,8 +929,6 @@ where
     policy: HybridCachePolicy,
     store: Store<K, V, S, HybridCacheProperties>,
     ctx: Arc<GetOrFetchCtx>,
-    metrics: Arc<Metrics>,
-    start: Instant,
     #[cfg(feature = "tracing")]
     span: Span,
     #[cfg(feature = "tracing")]
@@ -991,29 +970,6 @@ where
             this.store.enqueue(entry.piece(), false);
         }
 
-        match res.as_ref() {
-            Ok(e) => match e.source() {
-                Source::Outer => {
-                    this.metrics.hybrid_miss.increase(1);
-                    this.metrics
-                        .hybrid_miss_duration
-                        .record(this.start.elapsed().as_secs_f64());
-                }
-                Source::Memory | Source::Disk => {
-                    this.metrics.hybrid_hit.increase(1);
-                    this.metrics
-                        .hybrid_hit_duration
-                        .record(this.start.elapsed().as_secs_f64());
-                }
-            },
-            Err(_) => {
-                this.metrics.hybrid_error.increase(1);
-                this.metrics
-                    .hybrid_error_duration
-                    .record(this.start.elapsed().as_secs_f64());
-            }
-        }
-
         try_cancel!(this.span, *this.span_cancel_threshold);
 
         Poll::Ready(res)
@@ -1041,8 +997,6 @@ where
             policy: self.policy,
             store: self.store,
             ctx: self.ctx,
-            metrics: self.metrics,
-            start: self.start,
             #[cfg(feature = "tracing")]
             span: self.span,
             #[cfg(feature = "tracing")]
@@ -1051,12 +1005,37 @@ where
     }
 }
 
+// Preserve the existing distinction: get() counts any returned entry as a hit,
+// while get_or_fetch() counts an entry fetched from outside the cache as a miss.
+fn record_lookup(metrics: &Metrics, start: Instant, result: Result<Option<Source>>, fetch: bool) {
+    let elapsed = start.elapsed().as_secs_f64();
+    match result {
+        Ok(Some(source)) if !fetch || source != Source::Outer => {
+            metrics.hybrid_hit.increase(1);
+            metrics.hybrid_hit_duration.record(elapsed);
+        }
+        Ok(_) => {
+            metrics.hybrid_miss.increase(1);
+            metrics.hybrid_miss_duration.record(elapsed);
+        }
+        Err(_) => {
+            metrics.hybrid_error.increase(1);
+            metrics.hybrid_error_duration.record(elapsed);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{path::Path, sync::Arc};
 
     use asyncband::barrier::Barrier;
-    use foyer_common::{hasher::ModHasher, properties::Source};
+    use foyer_common::{
+        code::{HashBuilder, StorageKey, StorageValue},
+        hasher::ModHasher,
+        metrics::Metrics,
+        properties::Source,
+    };
     use foyer_storage::{StorageFilter, test_utils::*};
     use storage::test_utils::Biased;
 
@@ -1093,6 +1072,205 @@ mod tests {
             .build()
             .await
             .unwrap()
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq)]
+    struct LookupSamples {
+        count: u64,
+        durations: Vec<f64>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct LookupRecorder {
+        samples: Arc<std::sync::Mutex<LookupSamples>>,
+    }
+
+    impl mixtrics::metrics::CounterOps for LookupRecorder {
+        fn increase(&self, val: u64) {
+            self.samples.lock().unwrap().count += val;
+        }
+    }
+
+    impl mixtrics::metrics::HistogramOps for LookupRecorder {
+        fn record(&self, val: f64) {
+            self.samples.lock().unwrap().durations.push(val);
+        }
+    }
+
+    impl LookupRecorder {
+        fn snapshot(&self) -> LookupSamples {
+            self.samples.lock().unwrap().clone()
+        }
+
+        async fn wait_for(&self, count: u64) -> LookupSamples {
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                loop {
+                    let samples = self.snapshot();
+                    if samples.durations.len() as u64 >= count {
+                        assert_eq!(samples.count, count);
+                        assert_eq!(samples.durations.len() as u64, count);
+                        return samples;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("lookup did not record completion")
+        }
+    }
+
+    // Replace only hybrid lookup metrics; the cache and its background tasks still
+    // exercise the production lookup, coalescing, and result delivery paths.
+    fn record_lookups<K, V, S>(cache: &mut HybridCache<K, V, S>) -> [LookupRecorder; 3]
+    where
+        K: StorageKey,
+        V: StorageValue,
+        S: HashBuilder + std::fmt::Debug,
+    {
+        let [hit, miss, error] = std::array::from_fn(|_| LookupRecorder::default());
+        let metrics = Metrics {
+            hybrid_hit: Box::new(hit.clone()),
+            hybrid_hit_duration: Box::new(hit.clone()),
+            hybrid_miss: Box::new(miss.clone()),
+            hybrid_miss_duration: Box::new(miss.clone()),
+            hybrid_error: Box::new(error.clone()),
+            hybrid_error_duration: Box::new(error.clone()),
+            ..Metrics::noop()
+        };
+        Arc::get_mut(&mut cache.inner).unwrap().metrics = Arc::new(metrics);
+        [hit, miss, error]
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lookup_metrics_memory_completion() {
+        let mut cache: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+        let [hit, miss, error] = record_lookups(&mut cache);
+        cache.insert(1, 1);
+
+        let get = cache.get(&1);
+        let fetch = cache.get_or_fetch(&1, || async { Ok::<_, Error>(2) });
+        let unwrap_get = cache.get(&1);
+        let unwrap_fetch = cache.get_or_fetch(&1, || async { Ok::<_, Error>(2) });
+        let dropped_get = cache.get(&1);
+        let dropped_fetch = cache.get_or_fetch(&1, || async { Ok::<_, Error>(2) });
+
+        // All samples must exist before any result is consumed. Comparing the
+        // complete snapshot also proves consuming results cannot extend durations.
+        let before = hit.snapshot();
+        assert_eq!(before.count, 6);
+        assert_eq!(before.durations.len(), 6);
+        assert_eq!(*get.await.unwrap().unwrap(), 1);
+        assert_eq!(*fetch.await.unwrap(), 1);
+        assert_eq!(*unwrap_get.try_unwrap().unwrap(), 1);
+        assert_eq!(*unwrap_fetch.try_unwrap().unwrap(), 1);
+        drop(dropped_get);
+        drop(dropped_fetch);
+        assert_eq!(hit.snapshot(), before);
+        assert_eq!(miss.snapshot().count, 0);
+        assert_eq!(error.snapshot().count, 0);
+        cache.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lookup_metrics_coalesced_fetch_completion() {
+        let mut cache: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+        let [hit, miss, error] = record_lookups(&mut cache);
+        let (release, ready) = asyncband::oneshot::channel();
+        let mut leader = Box::pin(cache.get_or_fetch(&1, || async move {
+            ready.await.unwrap();
+            Ok::<_, Error>(1)
+        }));
+        assert!(futures_util::FutureExt::now_or_never(leader.as_mut()).is_none());
+        let follower = cache.get_or_fetch(&1, || async {
+            panic!("coalesced fetch must not run");
+            #[expect(unreachable_code)]
+            Ok::<_, Error>(2)
+        });
+        let dropped = cache.get_or_fetch(&1, || async { Ok::<_, Error>(3) });
+        // get() preserves its existing hit classification when it joins an outer fetch.
+        let get = cache.get(&1);
+        drop(dropped);
+        assert_eq!(miss.snapshot().count, 0);
+        release.send(()).unwrap();
+
+        let before = miss.wait_for(3).await;
+        let hit_before = hit.wait_for(1).await;
+        assert_eq!(*leader.await.unwrap(), 1);
+        assert_eq!(*follower.await.unwrap(), 1);
+        assert_eq!(*get.await.unwrap().unwrap(), 1);
+        assert_eq!(miss.snapshot(), before);
+        assert_eq!(hit.snapshot(), hit_before);
+        assert_eq!(error.snapshot().count, 0);
+        cache.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lookup_metrics_miss_and_error_completion() {
+        let mut cache: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+        let [hit, miss, error] = record_lookups(&mut cache);
+        let get = cache.get(&1);
+        let before = miss.wait_for(1).await;
+        assert!(get.await.unwrap().is_none());
+        assert_eq!(miss.snapshot(), before);
+
+        let fetch = cache.get_or_fetch(&2, || async { Err::<u64, _>(anyhow::anyhow!("fetch failed")) });
+        let before = error.wait_for(1).await;
+        assert!(fetch.await.is_err());
+        assert_eq!(error.snapshot(), before);
+        assert_eq!(hit.snapshot().count, 0);
+        cache.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lookup_metrics_disk_completion() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = open(dir.path()).await;
+        let [hit, miss, error] = record_lookups(&mut cache);
+        cache.insert(1, vec![1; KB]);
+        cache.insert(2, vec![2; KB]);
+        cache.memory().evict_all();
+        cache.storage().wait().await;
+
+        let get = cache.get(&1);
+        let fetch = cache.get_or_fetch(&2, || async { Err::<Vec<u8>, _>(anyhow::anyhow!("unexpected fetch")) });
+        let before = hit.wait_for(2).await;
+        assert_eq!(get.await.unwrap().unwrap().source(), Source::Disk);
+        assert_eq!(fetch.await.unwrap().source(), Source::Disk);
+        assert_eq!(hit.snapshot(), before);
+        assert_eq!(miss.snapshot().count, 0);
+        assert_eq!(error.snapshot().count, 0);
+        cache.close().await.unwrap();
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_lookup_metrics_insert_completes_waiters_once() {
+        let mut cache: HybridCache<u64, u64> = HybridCacheBuilder::new().memory(MB).storage().build().await.unwrap();
+        let [hit, miss, error] = record_lookups(&mut cache);
+        let (started, start) = asyncband::oneshot::channel();
+        let (release, ready) = asyncband::oneshot::channel();
+        let (finished, finish) = asyncband::oneshot::channel();
+        let fetch = cache.get_or_fetch(&1, || async move {
+            started.send(()).unwrap();
+            ready.await.unwrap();
+            finished.send(()).unwrap();
+            Ok::<_, Error>(2)
+        });
+        start.await.unwrap();
+        let get = cache.get(&1);
+        cache.insert(1, 1);
+        let before = miss.snapshot();
+        assert_eq!(before.count, 1);
+        assert_eq!(before.durations.len(), 1);
+        assert_eq!(hit.snapshot().count, 1);
+        assert_eq!(*fetch.await.unwrap(), 1);
+        assert_eq!(*get.await.unwrap().unwrap(), 1);
+        release.send(()).unwrap();
+        finish.await.unwrap();
+        // The completion callback is owned by each notifier, so the later fetch
+        // completion cannot record the same requests a second time.
+        assert_eq!(miss.snapshot(), before);
+        assert_eq!(error.snapshot().count, 0);
+        cache.close().await.unwrap();
     }
 
     #[test_log::test(tokio::test)]

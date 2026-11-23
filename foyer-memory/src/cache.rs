@@ -37,7 +37,7 @@ use crate::{
         sieve::{Sieve, SieveConfig},
     },
     indexer::hash_table::HashTableIndexer,
-    inflight::{OptionalFetchBuilder, RequiredFetchBuilder},
+    inflight::{FetchObserver, OptionalFetchBuilder, RequiredFetchBuilder},
     pipe::ArcPipe,
     raw::{Filter, RawCache, RawCacheConfig, RawCacheEntry, RawGetOrFetch, Weighter},
 };
@@ -1160,6 +1160,36 @@ where
             Cache::Lfu(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
             Cache::S3Fifo(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
             Cache::Sieve(cache) => cache.get_or_fetch_inner(key, fo, fr, ctx, spawner).into(),
+        }
+    }
+
+    /// Internal lookup with a per-request observer, independent of result consumption.
+    #[doc(hidden)]
+    #[cfg_attr(
+        feature = "tracing",
+        fastrace::trace(name = "foyer::memory::cache::get_or_fetch_inner")
+    )]
+    pub fn get_or_fetch_observed<Q, C, FO, FR>(
+        &self,
+        key: &Q,
+        fo: FO,
+        fr: FR,
+        ctx: C,
+        spawner: &Spawner,
+        observer: Option<impl FetchObserver>,
+    ) -> GetOrFetch<K, V, S, P>
+    where
+        Q: Hash + Equivalent<K> + ?Sized + ToOwned<Owned = K>,
+        C: Any + Send + Sync + 'static,
+        FO: FnOnce() -> Option<OptionalFetchBuilder<K, V, P, C>>,
+        FR: FnOnce() -> Option<RequiredFetchBuilder<K, V, P, C>>,
+    {
+        match self {
+            Cache::Fifo(cache) => cache.get_or_fetch_observed(key, fo, fr, ctx, spawner, observer).into(),
+            Cache::Lru(cache) => cache.get_or_fetch_observed(key, fo, fr, ctx, spawner, observer).into(),
+            Cache::Lfu(cache) => cache.get_or_fetch_observed(key, fo, fr, ctx, spawner, observer).into(),
+            Cache::S3Fifo(cache) => cache.get_or_fetch_observed(key, fo, fr, ctx, spawner, observer).into(),
+            Cache::Sieve(cache) => cache.get_or_fetch_observed(key, fo, fr, ctx, spawner, observer).into(),
         }
     }
 }
