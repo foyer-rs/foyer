@@ -62,6 +62,46 @@ use crate::{
     keeper::PieceRef,
 };
 
+struct EntryCharge {
+    bytes: usize,
+    remaining: Arc<AtomicUsize>,
+}
+
+impl Drop for EntryCharge {
+    fn drop(&mut self) {
+        self.remaining.fetch_add(self.bytes, Ordering::Relaxed);
+    }
+}
+
+pub struct WriteEntry<K, V, P>
+where
+    K: StorageKey,
+{
+    // Release the keeper reference before making its byte budget available again.
+    piece: PieceRef<K, V, P>,
+    charge: EntryCharge,
+}
+
+impl<K, V, P> WriteEntry<K, V, P>
+where
+    K: StorageKey,
+{
+    pub fn try_new(piece: PieceRef<K, V, P>, estimated_size: usize, remaining: &Arc<AtomicUsize>) -> Option<Self> {
+        remaining
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |bytes| {
+                bytes.checked_sub(estimated_size)
+            })
+            .ok()?;
+        Some(Self {
+            piece,
+            charge: EntryCharge {
+                bytes: estimated_size,
+                remaining: remaining.clone(),
+            },
+        })
+    }
+}
+
 pub enum Submission<K, V, P>
 where
     K: StorageKey,
@@ -69,8 +109,7 @@ where
     P: Properties,
 {
     CacheEntry {
-        piece: PieceRef<K, V, P>,
-        estimated_size: usize,
+        entry: WriteEntry<K, V, P>,
         sequence: Sequence,
     },
     Tombstone {
@@ -93,14 +132,10 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CacheEntry {
-                piece,
-                estimated_size,
-                sequence,
-            } => f
+            Self::CacheEntry { entry, sequence } => f
                 .debug_struct("CacheEntry")
-                .field("piece", piece)
-                .field("estimated_size", estimated_size)
+                .field("piece", &entry.piece)
+                .field("estimated_size", &entry.charge.bytes)
                 .field("sequence", sequence)
                 .finish(),
             Self::Tombstone { tombstone, stats } => f
@@ -125,8 +160,6 @@ where
 {
     id: usize,
     tx: UnboundedSender<Submission<K, V, P>>,
-    submit_queue_size: Arc<AtomicUsize>,
-
     metrics: Arc<Metrics>,
 }
 
@@ -140,7 +173,6 @@ where
         Self {
             id: self.id,
             tx: self.tx.clone(),
-            submit_queue_size: self.submit_queue_size.clone(),
             metrics: self.metrics.clone(),
         }
     }
@@ -152,18 +184,9 @@ where
     V: StorageValue,
     P: Properties,
 {
-    pub fn new(
-        id: usize,
-        submit_queue_size: Arc<AtomicUsize>,
-        metrics: Arc<Metrics>,
-    ) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
+    pub fn new(id: usize, metrics: Arc<Metrics>) -> (Self, UnboundedReceiver<Submission<K, V, P>>) {
         let (tx, rx) = asyncband::mpsc::unbounded();
-        let this = Self {
-            id,
-            tx,
-            submit_queue_size,
-            metrics,
-        };
+        let this = Self { id, tx, metrics };
         (this, rx)
     }
 
@@ -211,7 +234,6 @@ where
             piece_refs: vec![],
             rotate_buffer,
             queue_init: None,
-            submit_queue_size: self.submit_queue_size.clone(),
             block_manager,
             indexer,
             tombstone_log,
@@ -236,9 +258,6 @@ where
 
     pub fn submit(&self, submission: Submission<K, V, P>) {
         tracing::trace!(id = self.id, "[block engine flusher]: submit task: {submission:?}");
-        if let Submission::CacheEntry { estimated_size, .. } = &submission {
-            self.submit_queue_size.fetch_add(*estimated_size, Ordering::Relaxed);
-        }
         if let Err(e) = self.tx.send(submission) {
             tracing::error!(
                 id = self.id,
@@ -268,15 +287,9 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
-struct IoTaskCtx<K, V, P>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
+struct IoTaskCtx {
     handle: Option<GetCleanBlockHandle>,
     waiters: Vec<oneshot::Sender<()>>,
-    piece_refs: Vec<PieceRef<K, V, P>>,
     init: Instant,
     io_slice: IoSlice,
     tombstone_infos: Vec<TombstoneInfo>,
@@ -296,7 +309,7 @@ where
     buffer: Option<Buffer>,
     ctx: SplitCtx,
     tombstone_infos: Vec<TombstoneInfo>,
-    piece_refs: Vec<PieceRef<K, V, P>>,
+    piece_refs: Vec<WriteEntry<K, V, P>>,
     waiters: Vec<oneshot::Sender<()>>,
     queue_init: Option<Instant>,
 
@@ -304,8 +317,6 @@ where
     ///
     /// Use this field to avoid allocation.
     rotate_buffer: Option<IoSliceMut>,
-
-    submit_queue_size: Arc<AtomicUsize>,
 
     current_block_handle: GetCleanBlockHandle,
 
@@ -319,7 +330,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx<K, V, P>>>,
+    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
 
     max_entry_size: usize,
 
@@ -333,7 +344,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx<K, V, P>> + '_ {
+    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + '_ {
         poll_fn(|cx| {
             if let Some(io_task) = self.io_tasks.front_mut() {
                 let res = ready!(io_task.poll_unpin(cx));
@@ -388,11 +399,11 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_block_handle = handle;
                     }
-                    self.handle_io_complete(piece_refs, waiters, tombstone_infos, init);
+                    self.handle_io_complete(waiters, tombstone_infos, init);
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
@@ -424,11 +435,8 @@ where
         };
 
         match submission {
-            Submission::CacheEntry {
-                piece,
-                estimated_size,
-                sequence,
-            } => {
+            Submission::CacheEntry { entry, sequence } => {
+                let piece = &entry.piece;
                 let enqueued = self.buffer.as_mut().unwrap().push(
                     piece.key(),
                     piece.value(),
@@ -437,10 +445,9 @@ where
                     sequence,
                 );
                 if enqueued {
-                    self.piece_refs.push(piece);
+                    self.piece_refs.push(entry);
                 }
                 report(enqueued);
-                self.submit_queue_size.fetch_sub(estimated_size, Ordering::Relaxed);
             }
 
             Submission::Tombstone { tombstone, stats } => self.tombstone_infos.push(TombstoneInfo { tombstone, stats }),
@@ -461,11 +468,11 @@ where
     fn submit_io_task(
         &self,
         batch: Batch,
-        piece_refs: Vec<PieceRef<K, V, P>>,
+        piece_refs: Vec<WriteEntry<K, V, P>>,
         tombstone_infos: Vec<TombstoneInfo>,
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
-    ) -> BoxFuture<'static, IoTaskCtx<K, V, P>> {
+    ) -> BoxFuture<'static, IoTaskCtx> {
         let id = self.id;
 
         tracing::trace!(
@@ -619,36 +626,26 @@ where
         let handle = self
             .spawner
             .spawn(Box::pin(try_join(try_join_all(futures), future)))
-            .map(move |jres| match jres {
-                Ok(Ok((mut states, ()))) => IoTaskCtx {
-                    handle: states.pop(),
-                    piece_refs,
+            .map(move |jres| {
+                let handle = match jres {
+                    Ok(Ok((mut states, ()))) => states.pop(),
+                    Ok(Err(e)) => {
+                        tracing::error!(id, ?e, "[block engine flusher]: io task error");
+                        None
+                    }
+                    Err(e) => {
+                        tracing::error!(id, ?e, "[block engine flusher]: join io task error");
+                        None
+                    }
+                };
+                // The I/O task publishes the disk index on success before we release the original entries.
+                drop(piece_refs);
+                IoTaskCtx {
+                    handle,
                     waiters,
                     init,
                     io_slice: bytes,
                     tombstone_infos,
-                },
-                Ok(Err(e)) => {
-                    tracing::error!(id, ?e, "[block engine flusher]: io task error");
-                    IoTaskCtx {
-                        handle: None,
-                        piece_refs,
-                        waiters,
-                        init,
-                        io_slice: bytes,
-                        tombstone_infos,
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(id, ?e, "[block engine flusher]: join io task error");
-                    IoTaskCtx {
-                        handle: None,
-                        piece_refs,
-                        waiters,
-                        init,
-                        io_slice: bytes,
-                        tombstone_infos,
-                    }
                 }
             });
 
@@ -657,13 +654,10 @@ where
 
     fn handle_io_complete(
         &self,
-        piece_refs: Vec<PieceRef<K, V, P>>,
         waiters: Vec<oneshot::Sender<()>>,
         tombstone_infos: Vec<TombstoneInfo>,
         init: Instant,
     ) {
-        drop(piece_refs);
-
         self.indexer.remove_batch(
             tombstone_infos
                 .iter()
@@ -678,5 +672,44 @@ where
         self.metrics
             .storage_queue_rotate_duration
             .record(init.elapsed().as_secs_f64());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer_memory::{Cache, CacheBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_rejected_and_dropped_submissions_release_their_byte_budget() {
+        let memory: Cache<u64, u64> = CacheBuilder::new(16).build();
+        let keeper = crate::keeper::Keeper::new(1);
+        let remaining = Arc::new(AtomicUsize::new(16));
+
+        // An oversized entry is rejected even when the entire budget is available.
+        let entry = keeper.insert(memory.insert(0, 0).piece());
+        assert!(WriteEntry::try_new(entry, 17, &remaining).is_none());
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
+        assert!(keeper.get(memory.hash(&0), &0).is_none());
+
+        let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
+        drop(rx);
+        let entry = memory.insert(1, 1);
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &remaining).unwrap();
+        assert_eq!(remaining.load(Ordering::Relaxed), 0);
+        flusher.submit(Submission::CacheEntry { entry, sequence: 1 });
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
+        assert!(keeper.get(memory.hash(&1), &1).is_none());
+
+        let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
+        let entry = memory.insert(2, 2);
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &remaining).unwrap();
+        flusher.submit(Submission::CacheEntry { entry, sequence: 2 });
+        assert_eq!(remaining.load(Ordering::Relaxed), 0);
+        drop(flusher);
+        drop(rx);
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
+        assert!(keeper.get(memory.hash(&2), &2).is_none());
     }
 }

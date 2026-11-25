@@ -42,7 +42,7 @@ use futures_util::{
 use itertools::Itertools;
 
 use super::{
-    flusher::{Flusher, InvalidStats, Submission},
+    flusher::{Flusher, InvalidStats, Submission, WriteEntry},
     indexer::Indexer,
     recover::RecoverRunner,
 };
@@ -50,7 +50,6 @@ use super::{
 use crate::test_utils::*;
 use crate::{
     Device, Load, RejectAll, Statistics, StorageFilter, StorageFilterResult,
-    compress::Compression,
     engine::{
         Engine, EngineBuildContext, EngineConfig, Populated,
         block::{
@@ -87,7 +86,6 @@ where
 {
     device: Arc<dyn Device>,
     block_size: usize,
-    compression: Compression,
     indexer_shards: usize,
     recover_concurrency: usize,
     flushers: usize,
@@ -117,7 +115,6 @@ where
         f.debug_struct("BlockEngineConfig")
             .field("device", &self.device)
             .field("block_size", &self.block_size)
-            .field("compression", &self.compression)
             .field("indexer_shards", &self.indexer_shards)
             .field("recover_concurrency", &self.recover_concurrency)
             .field("flushers", &self.flushers)
@@ -145,7 +142,6 @@ where
         Self {
             device,
             block_size: 16 * 1024 * 1024, // 16 MiB
-            compression: Compression::default(),
             indexer_shards: 64,
             recover_concurrency: 8,
             flushers: 1,
@@ -253,10 +249,11 @@ where
 
     /// Set the submit queue size threshold.
     ///
-    /// If the total entry estimated size in the submit queue exceeds the threshold, the further entries will be
-    /// ignored.
+    /// Limit the total estimated entry bytes retained by queued, buffered and in-flight writes.
+    /// Entries that do not fit within the remaining budget, including any single entry larger than the
+    /// threshold, are ignored.
     ///
-    /// Default: `buffer_pool_size` * 2.
+    /// Default: 16 MiB.
     pub fn with_submit_queue_size_threshold(mut self, submit_queue_size_threshold: usize) -> Self {
         self.submit_queue_size_threshold = submit_queue_size_threshold;
         self
@@ -332,6 +329,7 @@ where
             metrics,
             spawner: runtime,
             recover_mode,
+            compression,
         }: EngineBuildContext,
     ) -> Result<Arc<BlockEngine<K, V, P>>> {
         let io_engine = io_engine_config
@@ -366,11 +364,10 @@ where
         };
 
         let indexer = Indexer::new(self.indexer_shards);
-        let submit_queue_size = Arc::<AtomicUsize>::default();
 
         #[expect(clippy::type_complexity)]
         let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) = (0..self.flushers)
-            .map(|id| Flusher::<K, V, P>::new(id, submit_queue_size.clone(), metrics.clone()))
+            .map(|id| Flusher::<K, V, P>::new(id, metrics.clone()))
             .unzip();
 
         let reclaimer = Reclaimer::new(
@@ -427,7 +424,7 @@ where
                 block_size,
                 io_buffer_size,
                 self.blob_index_size,
-                self.compression,
+                compression,
                 indexer.clone(),
                 block_manager.clone(),
                 tombstone_log.clone(),
@@ -446,8 +443,7 @@ where
             indexer,
             block_manager,
             flushers,
-            submit_queue_size,
-            submit_queue_size_threshold: self.submit_queue_size_threshold,
+            remaining_write_bytes: Arc::new(AtomicUsize::new(self.submit_queue_size_threshold)),
             sequence,
             _spawner: runtime,
             active: AtomicBool::new(true),
@@ -522,8 +518,7 @@ where
 
     flushers: Vec<Flusher<K, V, P>>,
 
-    submit_queue_size: Arc<AtomicUsize>,
-    submit_queue_size_threshold: usize,
+    remaining_write_bytes: Arc<AtomicUsize>,
 
     sequence: AtomicSequence,
 
@@ -599,18 +594,15 @@ where
             }
         }
 
-        if self.inner.submit_queue_size.load(Ordering::Relaxed) > self.inner.submit_queue_size_threshold {
+        let flusher = &self.inner.flushers[piece.hash() as usize % self.inner.flushers.len()];
+        let Some(entry) = WriteEntry::try_new(piece, estimated_size, &self.inner.remaining_write_bytes) else {
             self.inner.metrics.storage_queue_channel_overflow.increase(1);
             return;
-        }
+        };
 
         let sequence = self.inner.sequence.fetch_add(1, Ordering::Relaxed);
 
-        self.inner.flushers[piece.hash() as usize % self.inner.flushers.len()].submit(Submission::CacheEntry {
-            piece,
-            estimated_size,
-            sequence,
-        });
+        flusher.submit(Submission::CacheEntry { entry, sequence });
     }
 
     fn load(&self, hash: u64) -> impl Future<Output = Result<Load<K, V, P>>> + Send + 'static {
@@ -864,13 +856,15 @@ mod tests {
     use std::{fs::File, path::Path};
 
     use bytesize::ByteSize;
-    use foyer_common::hasher::ModHasher;
+    use foyer_common::{code::Code, hasher::ModHasher};
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
 
     use super::*;
     use crate::{
         PsyncIoEngineConfig, RejectAll,
+        compress::Compression,
         engine::RecoverMode,
         io::{
             device::{DeviceBuilder, combined::CombinedDeviceBuilder, fs::FsDeviceBuilder},
@@ -881,6 +875,117 @@ mod tests {
     };
 
     const KB: usize = 1024;
+
+    #[tokio::test]
+    async fn test_compressed_entries_retain_their_byte_budget_until_flush() {
+        struct TrackedValue {
+            bytes: Vec<u8>,
+            encoded: Arc<AtomicBool>,
+        }
+
+        impl Code for TrackedValue {
+            fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
+                self.bytes.encode(writer)?;
+                self.encoded.store(true, Ordering::Relaxed);
+                Ok(())
+            }
+
+            fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
+                Ok(Self {
+                    bytes: Vec::<u8>::decode(reader)?,
+                    encoded: Arc::new(AtomicBool::new(true)),
+                })
+            }
+
+            fn estimated_size(&self) -> usize {
+                self.bytes.estimated_size()
+            }
+        }
+
+        const MB: usize = 1024 * KB;
+        let dir = tempfile::tempdir().unwrap();
+        let memory: Cache<u64, TrackedValue> = CacheBuilder::new(16).build();
+        let keeper = crate::keeper::Keeper::new(1);
+        let value = vec![42u8; MB];
+        let estimated_size = EntrySerializer::estimated_size(&1u64, &value);
+        let budget = 2 * estimated_size;
+        let device = FsDeviceBuilder::new(dir.path()).with_capacity(2 * MB).build().unwrap();
+        let engine = Box::new(
+            BlockEngineConfig::new(device)
+                .with_block_size(256 * KB)
+                .with_buffer_pool_size(64 * KB)
+                .with_submit_queue_size_threshold(budget),
+        )
+        .build(EngineBuildContext {
+            io_engine_config: PsyncIoEngineConfig::new().boxed(),
+            metrics: Arc::new(Metrics::noop()),
+            spawner: Spawner::current(),
+            recover_mode: RecoverMode::None,
+            compression: Compression::Zstd,
+        })
+        .await
+        .unwrap();
+        engine.hold_flush();
+
+        let mut retained_values = Vec::new();
+        for key in 0..3u64 {
+            let encoded = Arc::new(AtomicBool::new(false));
+            let retained = Arc::downgrade(&encoded);
+            memory.insert(
+                key,
+                TrackedValue {
+                    bytes: value.clone(),
+                    encoded,
+                },
+            );
+            let piece = keeper.insert(memory.remove(&key).unwrap().piece());
+            engine.enqueue(piece, estimated_size);
+
+            // A live marker tracks the original value. Wait for serialization or rejection
+            // before submitting another value so the budget must cover buffered entries.
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while retained
+                    .upgrade()
+                    .is_some_and(|encoded| !encoded.load(Ordering::Relaxed))
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(retained.strong_count() > 0, key < 2);
+            retained_values.push(retained);
+        }
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), 0);
+
+        engine.unhold_flush();
+        engine.wait().await;
+        assert!(retained_values.iter().all(|value| value.strong_count() == 0));
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), budget);
+        for key in 0..2u64 {
+            let (_, restored, _) = engine.load(memory.hash(&key)).await.unwrap().entry().unwrap();
+            assert_eq!(restored.bytes, value);
+        }
+
+        // A value that cannot fit the serialization buffer releases its reserved bytes.
+        let mut bytes = vec![0u8; MB];
+        StdRng::seed_from_u64(1).fill(bytes.as_mut_slice());
+        let key = 3;
+        memory.insert(
+            key,
+            TrackedValue {
+                bytes,
+                encoded: Arc::new(AtomicBool::new(false)),
+            },
+        );
+        let piece = keeper.insert(memory.remove(&key).unwrap().piece());
+        engine.enqueue(piece, estimated_size);
+        engine.wait().await;
+        let hash = memory.hash(&key);
+        assert!(!keeper.contains(hash, &key));
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), budget);
+        assert!(engine.load(hash).await.unwrap().is_miss());
+    }
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher, TestProperties> {
         CacheBuilder::new(10)
@@ -908,7 +1013,6 @@ mod tests {
         let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
-            compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
@@ -933,6 +1037,7 @@ mod tests {
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
+                compression: Compression::None,
             })
             .await
             .unwrap()
@@ -950,7 +1055,6 @@ mod tests {
         let builder = BlockEngineConfig {
             device,
             block_size: 16 * 1024,
-            compression: Compression::None,
             indexer_shards: 4,
             recover_concurrency: 2,
             flushers: 1,
@@ -974,6 +1078,7 @@ mod tests {
                 metrics,
                 spawner,
                 recover_mode: RecoverMode::Strict,
+                compression: Compression::None,
             })
             .await
             .unwrap()
@@ -1400,6 +1505,7 @@ mod tests {
                 metrics: Arc::new(Metrics::noop()),
                 spawner,
                 recover_mode: RecoverMode::None,
+                compression: Compression::None,
             })
             .await
             .unwrap();
