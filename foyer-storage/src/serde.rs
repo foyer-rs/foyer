@@ -234,7 +234,7 @@ impl EntryDeserializer {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
+    use std::io;
 
     use foyer_common::code::Code;
 
@@ -246,11 +246,8 @@ mod tests {
         let mut encoded = Vec::new();
         let info = EntrySerializer::serialize(&1u64, &value, Compression::Lz4, &mut encoded).unwrap();
         let mut decoder = lz4::Decoder::new(&encoded[..info.value_len]).unwrap();
-        let mut decoded = Vec::new();
-        decoder.read_to_end(&mut decoded).unwrap();
+        assert_eq!(Vec::<u8>::decode(&mut decoder).unwrap(), value);
+        io::copy(&mut decoder, &mut io::sink()).unwrap();
         decoder.finish().1.unwrap();
-        let mut expected = Vec::new();
-        value.encode(&mut expected).unwrap();
-        assert_eq!(decoded, expected);
     }
 }

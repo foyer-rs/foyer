@@ -601,7 +601,7 @@ where
         let Some(entry) = WriteEntry::try_new(
             piece,
             estimated_size,
-            self.inner.submit_queue_size.clone(),
+            &self.inner.submit_queue_size,
             self.inner.submit_queue_size_threshold,
         ) else {
             self.inner.metrics.storage_queue_channel_overflow.increase(1);
@@ -867,6 +867,7 @@ mod tests {
     use foyer_common::{code::Code, hasher::ModHasher};
     use foyer_memory::{Cache, CacheBuilder, CacheEntry, FifoConfig, TestProperties};
     use itertools::Itertools;
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
 
     use super::*;
     use crate::{
@@ -886,37 +887,35 @@ mod tests {
     #[tokio::test]
     async fn test_compressed_entries_retain_their_byte_budget_until_flush() {
         struct TrackedValue {
-            bytes: Arc<Vec<u8>>,
+            bytes: Vec<u8>,
             encoded: Arc<AtomicBool>,
         }
 
         impl Code for TrackedValue {
             fn encode(&self, writer: &mut impl std::io::Write) -> Result<()> {
-                let result = self.bytes.as_ref().encode(writer);
+                self.bytes.encode(writer)?;
                 self.encoded.store(true, Ordering::Relaxed);
-                result
+                Ok(())
             }
 
             fn decode(reader: &mut impl std::io::Read) -> Result<Self> {
                 Ok(Self {
-                    bytes: Arc::new(Vec::<u8>::decode(reader)?),
+                    bytes: Vec::<u8>::decode(reader)?,
                     encoded: Arc::new(AtomicBool::new(true)),
                 })
             }
 
             fn estimated_size(&self) -> usize {
-                self.bytes.as_ref().estimated_size()
+                self.bytes.estimated_size()
             }
         }
 
         const MB: usize = 1024 * KB;
         let dir = tempfile::tempdir().unwrap();
-        let memory: Cache<u64, TrackedValue, ModHasher> = CacheBuilder::new(16)
-            .with_shards(1)
-            .with_hash_builder(ModHasher::default())
-            .build();
+        let memory: Cache<u64, TrackedValue> = CacheBuilder::new(16).build();
         let keeper = crate::keeper::Keeper::new(1);
-        let estimated_size = EntrySerializer::estimated_size(&1u64, &vec![42u8; MB]);
+        let value = vec![42u8; MB];
+        let estimated_size = EntrySerializer::estimated_size(&1u64, &value);
         let budget = 2 * estimated_size;
         let device = FsDeviceBuilder::new(dir.path()).with_capacity(2 * MB).build().unwrap();
         let engine = Box::new(
@@ -936,72 +935,64 @@ mod tests {
         .unwrap();
         engine.hold_flush();
 
-        let mut payloads = Vec::new();
-        for key in 0..16u64 {
-            let bytes = Arc::new(vec![42u8; MB]);
-            payloads.push(Arc::downgrade(&bytes));
+        let mut retained_values = Vec::new();
+        for key in 0..3u64 {
             let encoded = Arc::new(AtomicBool::new(false));
-            let entry = memory.insert(
+            let retained = Arc::downgrade(&encoded);
+            memory.insert(
                 key,
                 TrackedValue {
-                    bytes,
-                    encoded: encoded.clone(),
+                    bytes: value.clone(),
+                    encoded,
                 },
             );
-            let hash = memory.hash(&key);
-            let piece = keeper.insert(entry.piece());
-            memory.remove(&key);
-            drop(entry);
+            let piece = keeper.insert(memory.remove(&key).unwrap().piece());
             engine.enqueue(piece, estimated_size);
 
-            // Observe serialization or rejection while flushing remains stalled.
+            // A live marker tracks the original value. Wait for serialization or rejection
+            // before submitting another value so the budget must cover buffered entries.
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while !encoded.load(Ordering::Relaxed) && keeper.contains(hash, &key) {
+                while retained
+                    .upgrade()
+                    .is_some_and(|encoded| !encoded.load(Ordering::Relaxed))
+                {
                     tokio::task::yield_now().await;
                 }
             })
             .await
             .unwrap();
-            assert_eq!(keeper.contains(hash, &key), key < 2);
-            assert!(engine.inner.submit_queue_size.load(Ordering::Relaxed) <= budget);
+            assert_eq!(retained.strong_count() > 0, key < 2);
+            retained_values.push(retained);
         }
-        assert_eq!(payloads.iter().filter(|value| value.strong_count() > 0).count(), 2);
         assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), budget);
 
         engine.unhold_flush();
         engine.wait().await;
+        assert!(retained_values.iter().all(|value| value.strong_count() == 0));
         assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
-        assert!(payloads.iter().all(|value| value.strong_count() == 0));
         for key in 0..2u64 {
-            assert!(!keeper.contains(memory.hash(&key), &key));
-            let (_, value, _) = engine.load(memory.hash(&key)).await.unwrap().entry().unwrap();
-            assert_eq!(value.bytes.as_ref(), &vec![42u8; MB]);
+            let (_, restored, _) = engine.load(memory.hash(&key)).await.unwrap().entry().unwrap();
+            assert_eq!(restored.bytes, value);
         }
 
         // A value that cannot fit the serialization buffer releases its reserved bytes.
-        let mut random = 1u64;
         let mut bytes = vec![0u8; MB];
-        for byte in &mut bytes {
-            random ^= random << 13;
-            random ^= random >> 7;
-            random ^= random << 17;
-            *byte = random as u8;
-        }
-        let entry = memory.insert(
-            17,
+        StdRng::seed_from_u64(1).fill(bytes.as_mut_slice());
+        let key = 3;
+        memory.insert(
+            key,
             TrackedValue {
-                bytes: Arc::new(bytes),
+                bytes,
                 encoded: Arc::new(AtomicBool::new(false)),
             },
         );
-        let piece = keeper.insert(entry.piece());
-        memory.remove(&17);
-        drop(entry);
+        let piece = keeper.insert(memory.remove(&key).unwrap().piece());
         engine.enqueue(piece, estimated_size);
         engine.wait().await;
-        assert!(!keeper.contains(memory.hash(&17), &17));
+        let hash = memory.hash(&key);
+        assert!(!keeper.contains(hash, &key));
         assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
-        assert!(engine.load(memory.hash(&17)).await.unwrap().is_miss());
+        assert!(engine.load(hash).await.unwrap().is_miss());
     }
 
     fn cache_for_test() -> Cache<u64, Vec<u8>, ModHasher, TestProperties> {

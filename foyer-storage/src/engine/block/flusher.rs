@@ -62,7 +62,6 @@ use crate::{
     keeper::PieceRef,
 };
 
-#[derive(Debug)]
 struct EntryCharge {
     bytes: usize,
     used: Arc<AtomicUsize>,
@@ -83,18 +82,6 @@ where
     charge: EntryCharge,
 }
 
-impl<K, V, P> Debug for WriteEntry<K, V, P>
-where
-    K: StorageKey,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WriteEntry")
-            .field("piece", &self.piece)
-            .field("estimated_size", &self.charge.bytes)
-            .finish()
-    }
-}
-
 impl<K, V, P> WriteEntry<K, V, P>
 where
     K: StorageKey,
@@ -102,7 +89,7 @@ where
     pub fn try_new(
         piece: PieceRef<K, V, P>,
         estimated_size: usize,
-        used: Arc<AtomicUsize>,
+        used: &Arc<AtomicUsize>,
         limit: usize,
     ) -> Option<Self> {
         used.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
@@ -113,7 +100,7 @@ where
             piece,
             charge: EntryCharge {
                 bytes: estimated_size,
-                used,
+                used: used.clone(),
             },
         })
     }
@@ -151,7 +138,8 @@ where
         match self {
             Self::CacheEntry { entry, sequence } => f
                 .debug_struct("CacheEntry")
-                .field("entry", entry)
+                .field("piece", &entry.piece)
+                .field("estimated_size", &entry.charge.bytes)
                 .field("sequence", sequence)
                 .finish(),
             Self::Tombstone { tombstone, stats } => f
@@ -724,14 +712,14 @@ mod tests {
 
         // An oversized entry is rejected even when the entire budget is available.
         let entry = keeper.insert(memory.insert(0, 0).piece());
-        assert!(WriteEntry::try_new(entry, 16, used.clone(), 15).is_none());
+        assert!(WriteEntry::try_new(entry, 16, &used, 15).is_none());
         assert_eq!(used.load(Ordering::Relaxed), 0);
         assert!(keeper.get(memory.hash(&0), &0).is_none());
 
         let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
         drop(rx);
         let entry = memory.insert(1, 1);
-        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, used.clone(), 16).unwrap();
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &used, 16).unwrap();
         assert_eq!(used.load(Ordering::Relaxed), 16);
         flusher.submit(Submission::CacheEntry { entry, sequence: 1 });
         assert_eq!(used.load(Ordering::Relaxed), 0);
@@ -739,7 +727,7 @@ mod tests {
 
         let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
         let entry = memory.insert(2, 2);
-        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, used.clone(), 16).unwrap();
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &used, 16).unwrap();
         flusher.submit(Submission::CacheEntry { entry, sequence: 2 });
         assert_eq!(used.load(Ordering::Relaxed), 16);
         drop(flusher);

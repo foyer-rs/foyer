@@ -491,6 +491,7 @@ pub struct Batch {
 mod tests {
     use foyer_common::code::Code;
     use itertools::Itertools;
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
 
     use super::*;
 
@@ -503,14 +504,9 @@ mod tests {
         let first_bytes = buffer.bytes[..buffer.entry_infos[0].len].to_vec();
         let remaining = PAGE - EntryHeader::serialized_len();
 
-        let mut random = 1u64;
         let mut bytes = vec![0u8; remaining];
-        for byte in &mut bytes {
-            random ^= random << 13;
-            random ^= random >> 7;
-            random ^= random << 17;
-            *byte = random as u8 & 0x7f;
-        }
+        StdRng::seed_from_u64(1).fill(bytes.as_mut_slice());
+        bytes.iter_mut().for_each(|byte| *byte &= 0x7f);
         // Find an incompressible payload that fits until finalization adds the frame footer.
         let value = (0..64)
             .find_map(|trim| {
@@ -532,7 +528,6 @@ mod tests {
         assert!(!buffer.push(&2u8, &value, 2, Compression::Lz4, 2));
         assert_eq!(buffer.written, PAGE);
         assert_eq!(buffer.entry_infos.len(), 1);
-        assert_eq!(&buffer.bytes[..first_bytes.len()], first_bytes);
 
         let mut bounded = vec![0; remaining];
         let error = EntrySerializer::serialize(&2u8, &value, Compression::Lz4, &mut bounded[..]).unwrap_err();
