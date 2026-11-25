@@ -64,12 +64,12 @@ use crate::{
 
 struct EntryCharge {
     bytes: usize,
-    used: Arc<AtomicUsize>,
+    remaining: Arc<AtomicUsize>,
 }
 
 impl Drop for EntryCharge {
     fn drop(&mut self) {
-        self.used.fetch_sub(self.bytes, Ordering::Relaxed);
+        self.remaining.fetch_add(self.bytes, Ordering::Relaxed);
     }
 }
 
@@ -86,21 +86,17 @@ impl<K, V, P> WriteEntry<K, V, P>
 where
     K: StorageKey,
 {
-    pub fn try_new(
-        piece: PieceRef<K, V, P>,
-        estimated_size: usize,
-        used: &Arc<AtomicUsize>,
-        limit: usize,
-    ) -> Option<Self> {
-        used.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(estimated_size).filter(|next| *next <= limit)
-        })
-        .ok()?;
+    pub fn try_new(piece: PieceRef<K, V, P>, estimated_size: usize, remaining: &Arc<AtomicUsize>) -> Option<Self> {
+        remaining
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |bytes| {
+                bytes.checked_sub(estimated_size)
+            })
+            .ok()?;
         Some(Self {
             piece,
             charge: EntryCharge {
                 bytes: estimated_size,
-                used: used.clone(),
+                remaining: remaining.clone(),
             },
         })
     }
@@ -291,15 +287,9 @@ pub struct TombstoneInfo {
     pub stats: Option<InvalidStats>,
 }
 
-struct IoTaskCtx<K, V, P>
-where
-    K: StorageKey,
-    V: StorageValue,
-    P: Properties,
-{
+struct IoTaskCtx {
     handle: Option<GetCleanBlockHandle>,
     waiters: Vec<oneshot::Sender<()>>,
-    piece_refs: Vec<WriteEntry<K, V, P>>,
     init: Instant,
     io_slice: IoSlice,
     tombstone_infos: Vec<TombstoneInfo>,
@@ -340,7 +330,7 @@ where
 
     metrics: Arc<Metrics>,
 
-    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx<K, V, P>>>,
+    io_tasks: VecDeque<BoxFuture<'static, IoTaskCtx>>,
 
     max_entry_size: usize,
 
@@ -354,7 +344,7 @@ where
     V: StorageValue,
     P: Properties,
 {
-    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx<K, V, P>> + '_ {
+    fn next_io_task_finish(&mut self) -> impl Future<Output = IoTaskCtx> + '_ {
         poll_fn(|cx| {
             if let Some(io_task) = self.io_tasks.front_mut() {
                 let res = ready!(io_task.poll_unpin(cx));
@@ -409,11 +399,11 @@ where
 
             tokio::select! {
                 biased;
-                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos, piece_refs } = self.next_io_task_finish() => {
+                IoTaskCtx { handle, waiters, init, io_slice, tombstone_infos } = self.next_io_task_finish() => {
                     if let Some(handle) = handle {
                         self.current_block_handle = handle;
                     }
-                    self.handle_io_complete(piece_refs, waiters, tombstone_infos, init);
+                    self.handle_io_complete(waiters, tombstone_infos, init);
                     // `try_into_io_buffer` must return `Some(..)` here.
                     self.rotate_buffer = io_slice.try_into_io_slice_mut();
                 }
@@ -482,7 +472,7 @@ where
         tombstone_infos: Vec<TombstoneInfo>,
         waiters: Vec<oneshot::Sender<()>>,
         init: Instant,
-    ) -> BoxFuture<'static, IoTaskCtx<K, V, P>> {
+    ) -> BoxFuture<'static, IoTaskCtx> {
         let id = self.id;
 
         tracing::trace!(
@@ -636,36 +626,26 @@ where
         let handle = self
             .spawner
             .spawn(Box::pin(try_join(try_join_all(futures), future)))
-            .map(move |jres| match jres {
-                Ok(Ok((mut states, ()))) => IoTaskCtx {
-                    handle: states.pop(),
-                    piece_refs,
+            .map(move |jres| {
+                let handle = match jres {
+                    Ok(Ok((mut states, ()))) => states.pop(),
+                    Ok(Err(e)) => {
+                        tracing::error!(id, ?e, "[block engine flusher]: io task error");
+                        None
+                    }
+                    Err(e) => {
+                        tracing::error!(id, ?e, "[block engine flusher]: join io task error");
+                        None
+                    }
+                };
+                // The I/O task publishes the disk index on success before we release the original entries.
+                drop(piece_refs);
+                IoTaskCtx {
+                    handle,
                     waiters,
                     init,
                     io_slice: bytes,
                     tombstone_infos,
-                },
-                Ok(Err(e)) => {
-                    tracing::error!(id, ?e, "[block engine flusher]: io task error");
-                    IoTaskCtx {
-                        handle: None,
-                        piece_refs,
-                        waiters,
-                        init,
-                        io_slice: bytes,
-                        tombstone_infos,
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(id, ?e, "[block engine flusher]: join io task error");
-                    IoTaskCtx {
-                        handle: None,
-                        piece_refs,
-                        waiters,
-                        init,
-                        io_slice: bytes,
-                        tombstone_infos,
-                    }
                 }
             });
 
@@ -674,13 +654,10 @@ where
 
     fn handle_io_complete(
         &self,
-        piece_refs: Vec<WriteEntry<K, V, P>>,
         waiters: Vec<oneshot::Sender<()>>,
         tombstone_infos: Vec<TombstoneInfo>,
         init: Instant,
     ) {
-        drop(piece_refs);
-
         self.indexer.remove_batch(
             tombstone_infos
                 .iter()
@@ -708,31 +685,31 @@ mod tests {
     fn test_rejected_and_dropped_submissions_release_their_byte_budget() {
         let memory: Cache<u64, u64> = CacheBuilder::new(16).build();
         let keeper = crate::keeper::Keeper::new(1);
-        let used = Arc::new(AtomicUsize::new(0));
+        let remaining = Arc::new(AtomicUsize::new(16));
 
         // An oversized entry is rejected even when the entire budget is available.
         let entry = keeper.insert(memory.insert(0, 0).piece());
-        assert!(WriteEntry::try_new(entry, 16, &used, 15).is_none());
-        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert!(WriteEntry::try_new(entry, 17, &remaining).is_none());
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
         assert!(keeper.get(memory.hash(&0), &0).is_none());
 
         let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
         drop(rx);
         let entry = memory.insert(1, 1);
-        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &used, 16).unwrap();
-        assert_eq!(used.load(Ordering::Relaxed), 16);
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &remaining).unwrap();
+        assert_eq!(remaining.load(Ordering::Relaxed), 0);
         flusher.submit(Submission::CacheEntry { entry, sequence: 1 });
-        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
         assert!(keeper.get(memory.hash(&1), &1).is_none());
 
         let (flusher, rx) = Flusher::new(0, Arc::new(Metrics::noop()));
         let entry = memory.insert(2, 2);
-        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &used, 16).unwrap();
+        let entry = WriteEntry::try_new(keeper.insert(entry.piece()), 16, &remaining).unwrap();
         flusher.submit(Submission::CacheEntry { entry, sequence: 2 });
-        assert_eq!(used.load(Ordering::Relaxed), 16);
+        assert_eq!(remaining.load(Ordering::Relaxed), 0);
         drop(flusher);
         drop(rx);
-        assert_eq!(used.load(Ordering::Relaxed), 0);
+        assert_eq!(remaining.load(Ordering::Relaxed), 16);
         assert!(keeper.get(memory.hash(&2), &2).is_none());
     }
 }

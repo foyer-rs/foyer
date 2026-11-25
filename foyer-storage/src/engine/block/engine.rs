@@ -364,7 +364,6 @@ where
         };
 
         let indexer = Indexer::new(self.indexer_shards);
-        let submit_queue_size = Arc::<AtomicUsize>::default();
 
         #[expect(clippy::type_complexity)]
         let (flushers, rxs): (Vec<Flusher<K, V, P>>, Vec<UnboundedReceiver<Submission<K, V, P>>>) = (0..self.flushers)
@@ -444,8 +443,7 @@ where
             indexer,
             block_manager,
             flushers,
-            submit_queue_size,
-            submit_queue_size_threshold: self.submit_queue_size_threshold,
+            remaining_write_bytes: Arc::new(AtomicUsize::new(self.submit_queue_size_threshold)),
             sequence,
             _spawner: runtime,
             active: AtomicBool::new(true),
@@ -520,8 +518,7 @@ where
 
     flushers: Vec<Flusher<K, V, P>>,
 
-    submit_queue_size: Arc<AtomicUsize>,
-    submit_queue_size_threshold: usize,
+    remaining_write_bytes: Arc<AtomicUsize>,
 
     sequence: AtomicSequence,
 
@@ -598,12 +595,7 @@ where
         }
 
         let flusher = &self.inner.flushers[piece.hash() as usize % self.inner.flushers.len()];
-        let Some(entry) = WriteEntry::try_new(
-            piece,
-            estimated_size,
-            &self.inner.submit_queue_size,
-            self.inner.submit_queue_size_threshold,
-        ) else {
+        let Some(entry) = WriteEntry::try_new(piece, estimated_size, &self.inner.remaining_write_bytes) else {
             self.inner.metrics.storage_queue_channel_overflow.increase(1);
             return;
         };
@@ -964,12 +956,12 @@ mod tests {
             assert_eq!(retained.strong_count() > 0, key < 2);
             retained_values.push(retained);
         }
-        assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), budget);
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), 0);
 
         engine.unhold_flush();
         engine.wait().await;
         assert!(retained_values.iter().all(|value| value.strong_count() == 0));
-        assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), budget);
         for key in 0..2u64 {
             let (_, restored, _) = engine.load(memory.hash(&key)).await.unwrap().entry().unwrap();
             assert_eq!(restored.bytes, value);
@@ -991,7 +983,7 @@ mod tests {
         engine.wait().await;
         let hash = memory.hash(&key);
         assert!(!keeper.contains(hash, &key));
-        assert_eq!(engine.inner.submit_queue_size.load(Ordering::Relaxed), 0);
+        assert_eq!(engine.inner.remaining_write_bytes.load(Ordering::Relaxed), budget);
         assert!(engine.load(hash).await.unwrap().is_miss());
     }
 
