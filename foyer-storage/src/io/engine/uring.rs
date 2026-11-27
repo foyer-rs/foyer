@@ -14,6 +14,7 @@
 
 use std::{
     fmt::Debug,
+    num::NonZeroUsize,
     sync::{Arc, mpsc},
 };
 
@@ -35,14 +36,21 @@ use crate::{
     },
 };
 
+fn nonzero(value: usize) -> NonZeroUsize {
+    match NonZeroUsize::new(value) {
+        Some(value) => value,
+        None => unreachable!("default io_uring counts are nonzero"),
+    }
+}
+
 /// Config for io_uring based I/O engine.
 #[derive(Debug)]
 pub struct UringIoEngineConfig {
-    threads: usize,
-    cpus: Vec<u32>,
-    io_depth: usize,
+    threads: NonZeroUsize,
+    cpus: Option<Box<[u32]>>,
+    io_depth: NonZeroUsize,
     sqpoll: bool,
-    sqpoll_cpus: Vec<u32>,
+    sqpoll_cpus: Option<Box<[u32]>>,
     sqpoll_idle: u32,
     iopoll: bool,
     weight: f64,
@@ -63,11 +71,11 @@ impl UringIoEngineConfig {
     /// Create a new io_uring based I/O engine config with default configurations.
     pub fn new() -> Self {
         Self {
-            threads: 1,
-            cpus: vec![],
-            io_depth: 64,
+            threads: nonzero(1),
+            cpus: None,
+            io_depth: nonzero(64),
             sqpoll: false,
-            sqpoll_cpus: vec![],
+            sqpoll_cpus: None,
             sqpoll_idle: 10,
             iopoll: false,
             weight: 1.0,
@@ -79,21 +87,28 @@ impl UringIoEngineConfig {
     }
 
     /// Set the number of threads to use for the I/O engine.
-    pub fn with_threads(mut self, threads: usize) -> Self {
+    pub fn with_threads(mut self, threads: NonZeroUsize) -> Self {
         self.threads = threads;
         self
     }
 
     /// Bind the engine threads to specific CPUs.
     ///
-    /// The length of `cpus` must be equal to the threads.
-    pub fn with_cpus(mut self, cpus: Vec<u32>) -> Self {
-        self.cpus = cpus;
+    /// A nonempty CPU list also sets the thread count to the CPU count. An empty CPU list disables pinning.
+    pub fn with_cpus(mut self, cpus: impl Into<Box<[u32]>>) -> Self {
+        let cpus = cpus.into();
+        match NonZeroUsize::new(cpus.len()) {
+            Some(threads) => {
+                self.threads = threads;
+                self.cpus = Some(cpus);
+            }
+            None => self.cpus = None,
+        }
         self
     }
 
     /// Set the I/O depth for each thread.
-    pub fn with_io_depth(mut self, io_depth: usize) -> Self {
+    pub fn with_io_depth(mut self, io_depth: NonZeroUsize) -> Self {
         self.io_depth = io_depth;
         self
     }
@@ -147,9 +162,14 @@ impl UringIoEngineConfig {
     ///
     /// This flag is only meaningful when [`Self::with_sqpoll`] is enabled.
     ///
-    /// The length of `cpus` must be equal to the number of threads.
-    pub fn with_sqpoll_cpus(mut self, cpus: Vec<u32>) -> Self {
-        self.sqpoll_cpus = cpus;
+    /// The length of `cpus` must match the number of threads. An empty CPU list disables pinning.
+    pub fn with_sqpoll_cpus(mut self, cpus: impl Into<Box<[u32]>>) -> Self {
+        let cpus = cpus.into();
+        if cpus.is_empty() {
+            self.sqpoll_cpus = None;
+        } else {
+            self.sqpoll_cpus = Some(cpus);
+        }
         self
     }
 
@@ -180,19 +200,34 @@ impl UringIoEngineConfig {
 impl IoEngineConfig for UringIoEngineConfig {
     fn build(self: Box<Self>, _: IoEngineBuildContext) -> BoxFuture<'static, Result<Arc<dyn IoEngine>>> {
         async move {
-            if self.threads == 0 {
-                return Err(Error::new(ErrorKind::Config, "shards must be greater than 0")
-                    .with_context("threads", self.threads));
+            let threads = self.threads.get();
+            let io_depth = self.io_depth.get();
+
+            if let Some(cpus) = self.cpus.as_deref() {
+                if cpus.len() != threads {
+                    return Err(Error::new(ErrorKind::Config, "cpu count must match threads")
+                        .with_context("threads", threads)
+                        .with_context("cpus", cpus.len()));
+                }
             }
 
-            let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+            match (self.sqpoll, self.sqpoll_cpus.as_deref()) {
+                (true, Some(cpus)) if cpus.len() != threads => {
+                    return Err(Error::new(ErrorKind::Config, "sqpoll cpu count must match threads")
+                        .with_context("threads", threads)
+                        .with_context("sqpoll_cpus", cpus.len()));
+                }
+                _ => {}
+            }
+
+            let (read_txs, read_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..threads)
                 .map(|_| {
                     let (tx, rx) = mpsc::sync_channel(4096);
                     (tx, rx)
                 })
                 .unzip();
 
-            let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..self.threads)
+            let (write_txs, write_rxs): (Vec<mpsc::SyncSender<_>>, Vec<mpsc::Receiver<_>>) = (0..threads)
                 .map(|_| {
                     let (tx, rx) = mpsc::sync_channel(4096);
                     (tx, rx)
@@ -206,18 +241,18 @@ impl IoEngineConfig for UringIoEngineConfig {
                 }
                 if self.sqpoll {
                     builder.setup_sqpoll(self.sqpoll_idle);
-                    if !self.sqpoll_cpus.is_empty() {
-                        let cpu = self.sqpoll_cpus[i];
+                    if let Some(cpus) = &self.sqpoll_cpus {
+                        let cpu = cpus[i];
                         builder.setup_sqpoll_cpu(cpu);
                     }
                 }
-                let cpu = if self.cpus.is_empty() { None } else { Some(self.cpus[i]) };
-                let uring = builder.build(self.io_depth as _).map_err(Error::io_error)?;
+                let cpu = self.cpus.as_ref().map(|cpus| cpus[i]);
+                let uring = builder.build(io_depth as _).map_err(Error::io_error)?;
                 let shard = UringIoEngineShard {
                     read_rx,
                     write_rx,
                     uring,
-                    io_depth: self.io_depth,
+                    io_depth,
                     weight: self.weight,
                     read_inflight: 0,
                     write_inflight: 0,
@@ -452,5 +487,40 @@ impl IoEngine for UringIoEngine {
 
     fn write(&self, buf: Box<dyn IoBuf>, partition: &dyn Partition, offset: u64) -> IoHandle {
         self.write(buf, partition, offset)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use foyer_common::{error::ErrorKind, spawn::Spawner};
+
+    use super::*;
+
+    #[test_log::test(tokio::test)]
+    async fn test_uring_empty_cpu_sets_disable_pinning() {
+        let config = UringIoEngineConfig::new()
+            .with_cpus([0, 1])
+            .with_sqpoll_cpus([0, 1])
+            .with_cpus([])
+            .with_sqpoll_cpus([]);
+
+        assert_eq!(config.threads, nonzero(2));
+        assert!(config.cpus.is_none());
+        assert!(config.sqpoll_cpus.is_none());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_uring_rejects_mismatched_cpu_count() {
+        let err = UringIoEngineConfig::new()
+            .with_cpus([0, 1])
+            .with_threads(nonzero(3))
+            .boxed()
+            .build(IoEngineBuildContext {
+                spawner: Spawner::current(),
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::Config);
     }
 }
